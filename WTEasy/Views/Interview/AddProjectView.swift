@@ -23,6 +23,7 @@ struct AddProjectView: View {
     @State private var selectedEnvFiles: Set<String> = []
     @State private var detectedScripts: [DetectedScript] = []
     @State private var setupCommands: [String] = []
+    @State private var terminalStartCommand = ""
     @State private var runConfigurations: [EditableRunConfig] = []
 
     @State private var errorMessage: String?
@@ -194,6 +195,15 @@ struct AddProjectView: View {
                 }
             }
 
+            Section("Terminal") {
+                TextField("Start Command", text: $terminalStartCommand)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                Text("Runs automatically in every new terminal tab (e.g. `claude`)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Run Configurations") {
                 ForEach(Array(runConfigurations.enumerated()), id: \.offset) { index, _ in
                     VStack(alignment: .leading) {
@@ -255,6 +265,13 @@ struct AddProjectView: View {
                         Text(cmd)
                             .font(.system(.body, design: .monospaced))
                     }
+                }
+            }
+
+            if !terminalStartCommand.isEmpty {
+                Section("Terminal Start Command") {
+                    Text(terminalStartCommand)
+                        .font(.system(.body, design: .monospaced))
                 }
             }
 
@@ -423,6 +440,7 @@ struct AddProjectView: View {
         let profile = ProjectProfile()
         profile.envFilesToCopy = Array(selectedEnvFiles)
         profile.setupCommands = setupCommands.filter { !$0.isEmpty }
+        profile.terminalStartCommand = terminalStartCommand.isEmpty ? nil : terminalStartCommand
 
         for (index, config) in runConfigurations.enumerated() where !config.name.isEmpty {
             let rc = RunConfiguration(
@@ -445,6 +463,7 @@ struct AddProjectView: View {
         // Write .wteasy/config.json and update .gitignore
         Task {
             let configService = ConfigService()
+            let startCmd = terminalStartCommand.isEmpty ? nil : terminalStartCommand
             let config = ProjectConfig(
                 envFilesToCopy: Array(selectedEnvFiles),
                 setupCommands: setupCommands.filter { !$0.isEmpty },
@@ -459,7 +478,8 @@ struct AddProjectView: View {
                             autoStart: rc.autoStart,
                             order: index
                         )
-                    }
+                    },
+                terminalStartCommand: startCmd
             )
             try? await configService.writeConfig(config, forRepo: repoPath)
             try? await configService.ensureGitignore(forRepo: repoPath)

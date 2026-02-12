@@ -18,6 +18,7 @@ struct ProjectSettingsView: View {
     @State private var runConfigurations: [EditableRunConfig]
     @State private var setupCommands: [String]
     @State private var envFilesToCopy: [String]
+    @State private var terminalStartCommand: String
 
     init(project: Project) {
         self.project = project
@@ -34,6 +35,7 @@ struct ProjectSettingsView: View {
         let profile = project.profile
         _setupCommands = State(initialValue: profile?.setupCommands ?? [])
         _envFilesToCopy = State(initialValue: profile?.envFilesToCopy ?? [])
+        _terminalStartCommand = State(initialValue: profile?.terminalStartCommand ?? "")
         _runConfigurations = State(initialValue: (profile?.runConfigurations ?? [])
             .sorted { $0.order < $1.order }
             .map { EditableRunConfig(
@@ -123,6 +125,15 @@ struct ProjectSettingsView: View {
                     }
                 }
 
+                Section("Terminal") {
+                    TextField("Start Command", text: $terminalStartCommand)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                    Text("Runs automatically in every new terminal tab (e.g. `claude`)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Run Configurations") {
                     ForEach(Array(runConfigurations.enumerated()), id: \.offset) { index, _ in
                         VStack(alignment: .leading) {
@@ -180,6 +191,7 @@ struct ProjectSettingsView: View {
             if let config = await configService.readConfig(forRepo: project.repoPath) {
                 envFilesToCopy = config.envFilesToCopy
                 setupCommands = config.setupCommands
+                terminalStartCommand = config.terminalStartCommand ?? ""
                 runConfigurations = config.runConfigurations.map { rc in
                     EditableRunConfig(
                         name: rc.name,
@@ -262,6 +274,7 @@ struct ProjectSettingsView: View {
 
         profile.envFilesToCopy = envFilesToCopy.filter { !$0.isEmpty }
         profile.setupCommands = setupCommands.filter { !$0.isEmpty }
+        profile.terminalStartCommand = terminalStartCommand.isEmpty ? nil : terminalStartCommand
 
         // Remove old run configurations
         for existing in profile.runConfigurations {
@@ -285,6 +298,7 @@ struct ProjectSettingsView: View {
         // Write .wteasy/config.json
         Task {
             let configService = ConfigService()
+            let startCmd = terminalStartCommand.isEmpty ? nil : terminalStartCommand
             let config = ProjectConfig(
                 envFilesToCopy: envFilesToCopy.filter { !$0.isEmpty },
                 setupCommands: setupCommands.filter { !$0.isEmpty },
@@ -299,7 +313,8 @@ struct ProjectSettingsView: View {
                             autoStart: rc.autoStart,
                             order: index
                         )
-                    }
+                    },
+                terminalStartCommand: startCmd
             )
             try? await configService.writeConfig(config, forRepo: repoPath)
             try? await configService.ensureGitignore(forRepo: repoPath)

@@ -38,6 +38,11 @@ struct WorktreeDetailView: View {
         terminalSessionManager.runnerSessions(forWorktree: worktreeId)
     }
 
+    /// Runner tabs that correspond to run configurations (excludes setup sessions).
+    private var configRunnerTabs: [TerminalSession] {
+        runnerTabs.filter { !$0.runAsCommand }
+    }
+
     private var activeRunnerTabId: String? {
         terminalSessionManager.activeRunnerSessionId[worktreeId]
     }
@@ -103,22 +108,43 @@ struct WorktreeDetailView: View {
     private func ensureFirstTab() async {
         guard terminalSessionManager.sessions(forWorktree: worktreeId).isEmpty else { return }
 
-        var setupCommand: String?
-        if worktree.needsSetup == true, let repoPath = worktree.project?.repoPath {
+        // Load config for start command and (optionally) setup commands
+        var startCommand: String?
+        if let repoPath = worktree.project?.repoPath {
             let applicator = ProfileApplicator()
             if let config = await applicator.loadConfig(forRepo: repoPath) {
-                let commands = config.setupCommands.filter { !$0.isEmpty }
-                if !commands.isEmpty {
-                    setupCommand = commands.joined(separator: " && ")
+                // Run setup commands in the runner panel on first creation
+                if worktree.needsSetup == true {
+                    let commands = config.setupCommands.filter { !$0.isEmpty }
+                    if !commands.isEmpty {
+                        let setupCommand = commands.joined(separator: " && ")
+                        let session = terminalSessionManager.createSetupSession(
+                            worktreeId: worktreeId,
+                            workingDirectory: worktree.path,
+                            command: setupCommand
+                        )
+                        session.onProcessExit = { [weak terminalSessionManager] sessionId, exitCode in
+                            terminalSessionManager?.handleProcessExit(sessionId: sessionId, exitCode: exitCode)
+                        }
+                        showRunnerPanel = true
+                    }
+                }
+
+                if let cmd = config.terminalStartCommand, !cmd.isEmpty {
+                    startCommand = cmd
                 }
             }
+        }
+
+        if worktree.needsSetup == true {
             worktree.needsSetup = false
         }
 
+        // Create the main terminal tab with optional start command
         _ = terminalSessionManager.createTab(
             forWorktree: worktreeId,
             workingDirectory: worktree.path,
-            initialCommand: setupCommand
+            initialCommand: startCommand
         )
     }
 
@@ -174,24 +200,27 @@ struct WorktreeDetailView: View {
             .sorted(by: { $0.order < $1.order }) else { return }
         for config in configs where !config.command.isEmpty {
             let sessionId = "runner-\(worktreeId)-\(config.name)"
-            _ = terminalSessionManager.createRunnerSession(
+            let session = terminalSessionManager.createRunnerSession(
                 id: sessionId,
                 title: config.name,
                 worktreeId: worktreeId,
                 workingDirectory: worktree.path,
                 initialCommand: config.command
             )
+            session.onProcessExit = { [weak terminalSessionManager] sessionId, exitCode in
+                terminalSessionManager?.handleProcessExit(sessionId: sessionId, exitCode: exitCode)
+            }
         }
     }
 
     private func stopAllRunners() {
-        for session in runnerTabs {
+        for session in configRunnerTabs {
             terminalSessionManager.stopSession(id: session.id)
         }
     }
 
     private func restartAllRunners() {
-        for session in runnerTabs {
+        for session in configRunnerTabs {
             terminalSessionManager.restartSession(id: session.id)
         }
     }
@@ -235,7 +264,7 @@ struct WorktreeDetailView: View {
 
             // Run button
             if hasRunConfigurations {
-                if runnerTabs.isEmpty {
+                if configRunnerTabs.isEmpty {
                     Button {
                         startRunners()
                         showRunnerPanel = true
@@ -250,10 +279,21 @@ struct WorktreeDetailView: View {
             }
 
             Button {
-                _ = terminalSessionManager.createTab(
-                    forWorktree: worktreeId,
-                    workingDirectory: worktree.path
-                )
+                Task {
+                    var startCommand: String?
+                    if let repoPath = worktree.project?.repoPath {
+                        let applicator = ProfileApplicator()
+                        if let config = await applicator.loadConfig(forRepo: repoPath),
+                           let cmd = config.terminalStartCommand, !cmd.isEmpty {
+                            startCommand = cmd
+                        }
+                    }
+                    _ = terminalSessionManager.createTab(
+                        forWorktree: worktreeId,
+                        workingDirectory: worktree.path,
+                        initialCommand: startCommand
+                    )
+                }
             } label: {
                 Image(systemName: "plus")
                     .font(.caption)
@@ -321,7 +361,7 @@ struct WorktreeDetailView: View {
 
             Spacer()
 
-            if !runnerTabs.isEmpty {
+            if !configRunnerTabs.isEmpty {
                 // Restart all
                 Button {
                     restartAllRunners()
@@ -376,10 +416,25 @@ struct WorktreeDetailView: View {
         // Read runnerStateVersion so SwiftUI re-renders when stop/restart is called
         let _ = terminalSessionManager.runnerStateVersion
         HStack(spacing: 4) {
-            // Running indicator dot
-            Circle()
-                .fill(session.isProcessRunning ? .green : .secondary)
-                .frame(width: 6, height: 6)
+            // State indicator
+            switch session.state {
+            case .running:
+                Circle()
+                    .fill(.green)
+                    .frame(width: 6, height: 6)
+            case .succeeded:
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.system(size: 10))
+            case .failed:
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.red)
+                    .font(.system(size: 10))
+            case .idle:
+                Circle()
+                    .fill(.secondary)
+                    .frame(width: 6, height: 6)
+            }
 
             Button {
                 terminalSessionManager.setActiveRunnerSession(worktreeId: worktreeId, sessionId: session.id)
@@ -389,25 +444,28 @@ struct WorktreeDetailView: View {
             }
             .buttonStyle(.plain)
 
-            // Restart
-            Button {
-                terminalSessionManager.restartSession(id: session.id)
-            } label: {
-                Image(systemName: "arrow.counterclockwise")
-                    .font(.system(size: 8))
-            }
-            .buttonStyle(.plain)
-            .help("Restart")
+            // Only show restart/stop for interactive runners (not command-mode sessions)
+            if !session.runAsCommand {
+                // Restart
+                Button {
+                    terminalSessionManager.restartSession(id: session.id)
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 8))
+                }
+                .buttonStyle(.plain)
+                .help("Restart")
 
-            // Stop
-            Button {
-                terminalSessionManager.stopSession(id: session.id)
-            } label: {
-                Image(systemName: "stop.fill")
-                    .font(.system(size: 8))
+                // Stop
+                Button {
+                    terminalSessionManager.stopSession(id: session.id)
+                } label: {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 8))
+                }
+                .buttonStyle(.plain)
+                .help("Stop")
             }
-            .buttonStyle(.plain)
-            .help("Stop")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)

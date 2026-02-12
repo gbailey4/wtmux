@@ -5,15 +5,18 @@ public struct ProjectConfig: Codable, Sendable {
     public var envFilesToCopy: [String]
     public var setupCommands: [String]
     public var runConfigurations: [RunConfig]
+    public var terminalStartCommand: String?
 
     public init(
         envFilesToCopy: [String] = [],
         setupCommands: [String] = [],
-        runConfigurations: [RunConfig] = []
+        runConfigurations: [RunConfig] = [],
+        terminalStartCommand: String? = nil
     ) {
         self.envFilesToCopy = envFilesToCopy
         self.setupCommands = setupCommands
         self.runConfigurations = runConfigurations
+        self.terminalStartCommand = terminalStartCommand
     }
 
     public struct RunConfig: Codable, Sendable {

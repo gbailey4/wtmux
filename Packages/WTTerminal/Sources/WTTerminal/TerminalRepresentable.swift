@@ -21,6 +21,13 @@ public struct TerminalRepresentable: NSViewRepresentable {
             shellPath: session.shellPath,
             initialCommand: session.initialCommand
         )
+        view.runAsCommand = session.runAsCommand
+        if let onExit = session.onProcessExit {
+            let sessionId = session.id
+            view.onProcessExit = { exitCode in
+                onExit(sessionId, exitCode)
+            }
+        }
         let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         view.font = font
         session.terminalView = view
@@ -42,6 +49,12 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
     private let shellPath: String
     private let initialCommand: String?
     private var resizeTimer: Timer?
+
+    /// When true, starts shell with `-c command` instead of interactive mode.
+    public var runAsCommand: Bool = false
+
+    /// Called when the process exits (only fires for non-interactive / command mode).
+    public var onProcessExit: (@MainActor (Int32?) -> Void)?
 
     public init(workingDirectory: String, shellPath: String, initialCommand: String? = nil) {
         self.workingDirectory = workingDirectory
@@ -150,6 +163,11 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
 
     // MARK: - Process lifecycle
 
+    public override func processTerminated(_ source: SwiftTerm.LocalProcess, exitCode: Int32?) {
+        onProcessExit?(exitCode)
+        super.processTerminated(source, exitCode: exitCode)
+    }
+
     private func startProcessIfNeeded() {
         guard !processStarted else { return }
         processStarted = true
@@ -159,11 +177,14 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
         env["COLORTERM"] = "truecolor"
         let envStrings = env.map { "\($0.key)=\($0.value)" }
 
+        let useCommandMode = runAsCommand && initialCommand != nil
+        let args: [String] = useCommandMode ? ["-c", initialCommand!] : []
+
         startProcess(
             executable: shellPath,
-            args: [],
+            args: args,
             environment: envStrings,
-            execName: "-" + (shellPath as NSString).lastPathComponent,
+            execName: useCommandMode ? (shellPath as NSString).lastPathComponent : "-" + (shellPath as NSString).lastPathComponent,
             currentDirectory: workingDirectory
         )
 
@@ -174,8 +195,8 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
             }
         }
 
-        // Send initial command after shell has time to initialize
-        if let command = initialCommand, !command.isEmpty {
+        // Send initial command after shell has time to initialize (interactive mode only)
+        if !useCommandMode, let command = initialCommand, !command.isEmpty {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                 self?.sendCommand(command)
             }

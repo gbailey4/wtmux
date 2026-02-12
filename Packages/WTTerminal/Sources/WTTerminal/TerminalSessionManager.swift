@@ -158,6 +158,36 @@ public final class TerminalSessionManager: @unchecked Sendable {
         activeRunnerSessionId[worktreeId] = sessionId
     }
 
+    /// Creates a setup runner session that runs a command non-interactively.
+    public func createSetupSession(
+        worktreeId: String,
+        workingDirectory: String,
+        command: String
+    ) -> TerminalSession {
+        let id = "runner-\(worktreeId)-setup"
+        if let existing = sessions[id] {
+            return existing
+        }
+        let session = TerminalSession(
+            id: id,
+            title: "Setup",
+            worktreeId: worktreeId,
+            workingDirectory: workingDirectory,
+            initialCommand: command
+        )
+        session.runAsCommand = true
+        sessions[id] = session
+        activeRunnerSessionId[worktreeId] = id
+        return session
+    }
+
+    /// Updates session state based on process exit code.
+    public func handleProcessExit(sessionId: String, exitCode: Int32?) {
+        guard let session = sessions[sessionId] else { return }
+        session.state = (exitCode == 0) ? .succeeded : .failed
+        runnerStateVersion += 1
+    }
+
     /// Sends Ctrl+C then re-sends the initial command after a short delay.
     public func restartSession(id: String) {
         guard let session = sessions[id],

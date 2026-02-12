@@ -7,6 +7,7 @@ public final class ProjectProfile {
 
     public var envFilesToCopy: [String] = []
     public var setupCommands: [String] = []
+    public var terminalStartCommand: String?
 
     @Relationship(deleteRule: .cascade, inverse: \RunConfiguration.profile)
     public var runConfigurations: [RunConfiguration] = []

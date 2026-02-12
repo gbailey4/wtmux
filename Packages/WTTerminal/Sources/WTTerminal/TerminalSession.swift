@@ -1,6 +1,13 @@
 import Foundation
 import SwiftTerm
 
+public enum SessionState: Sendable {
+    case idle
+    case running
+    case succeeded
+    case failed
+}
+
 public final class TerminalSession: Identifiable, @unchecked Sendable {
     public let id: String
     public let title: String
@@ -9,8 +16,21 @@ public final class TerminalSession: Identifiable, @unchecked Sendable {
     public let shellPath: String
     public var initialCommand: String?
 
+    /// Lifecycle state for the session's process.
+    public var state: SessionState
+
     /// Whether the runner command is currently active (not the shell itself).
-    public var isProcessRunning: Bool
+    public var isProcessRunning: Bool {
+        get { state == .running }
+        set { state = newValue ? .running : .idle }
+    }
+
+    /// When true, the shell runs `initialCommand` via `-c` and exits instead of staying interactive.
+    public var runAsCommand: Bool = false
+
+    /// Called when the process exits (for non-interactive / command mode sessions).
+    /// Parameters: session ID, exit code.
+    public var onProcessExit: (@MainActor (String, Int32?) -> Void)?
 
     nonisolated(unsafe) public var terminalView: DeferredStartTerminalView?
 
@@ -28,6 +48,6 @@ public final class TerminalSession: Identifiable, @unchecked Sendable {
         self.workingDirectory = workingDirectory
         self.shellPath = shellPath
         self.initialCommand = initialCommand
-        self.isProcessRunning = initialCommand != nil
+        self.state = initialCommand != nil ? .running : .idle
     }
 }
