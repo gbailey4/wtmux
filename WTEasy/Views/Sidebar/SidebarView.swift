@@ -9,6 +9,7 @@ struct SidebarView: View {
 
     @Environment(\.modelContext) private var modelContext
     @State private var worktreeTargetProject: Project?
+    @State private var editingProject: Project?
 
     var body: some View {
         List(selection: $selectedWorktreeID) {
@@ -36,6 +37,15 @@ struct SidebarView: View {
                         .buttonStyle(.borderless)
                         .help("New Worktree")
                     }
+                    .contextMenu {
+                        Button("Project Settings...") {
+                            editingProject = project
+                        }
+                        Divider()
+                        Button("Delete Project", role: .destructive) {
+                            deleteProject(project)
+                        }
+                    }
                 }
             }
         }
@@ -55,10 +65,18 @@ struct SidebarView: View {
         .sheet(item: $worktreeTargetProject) { project in
             CreateWorktreeView(project: project)
         }
+        .sheet(item: $editingProject) { project in
+            ProjectSettingsView(project: project)
+        }
     }
 
     private func deleteWorktree(_ worktree: Worktree, from project: Project) {
         modelContext.delete(worktree)
+        try? modelContext.save()
+    }
+
+    private func deleteProject(_ project: Project) {
+        modelContext.delete(project)
         try? modelContext.save()
     }
 }
@@ -70,7 +88,9 @@ struct ProjectRow: View {
         HStack {
             Image(systemName: project.isRemote ? "globe" : "folder.fill")
                 .foregroundStyle(.secondary)
+                .font(.title3)
             Text(project.name)
+                .font(.title3)
                 .fontWeight(.medium)
         }
     }
