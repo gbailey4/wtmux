@@ -69,6 +69,9 @@ struct WorktreeDetailView: View {
                     runnerTerminalsView
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: 150, idealHeight: 250, maxHeight: 350)
+                } else if !configRunnerTabs.isEmpty || hasRunConfigurations {
+                    Divider()
+                    runnerStatusBar
                 }
             }
 
@@ -470,6 +473,77 @@ struct WorktreeDetailView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(session.id == activeRunnerTabId ? Color.accentColor.opacity(0.2) : Color.clear)
+    }
+
+    // MARK: - Runner Status Bar
+
+    @ViewBuilder
+    private var runnerStatusBar: some View {
+        let _ = terminalSessionManager.runnerStateVersion
+        Button {
+            if configRunnerTabs.isEmpty {
+                startRunners()
+            }
+            showRunnerPanel = true
+        } label: {
+            HStack(spacing: 0) {
+                if configRunnerTabs.isEmpty {
+                    // No runners started yet — show available count
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                        .padding(.trailing, 4)
+                    Text(runConfigSummaryText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    runnerStatusSummary
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+        .background(.bar)
+    }
+
+    @ViewBuilder
+    private var runnerStatusSummary: some View {
+        let running = configRunnerTabs.filter { $0.state == .running }.count
+        let failed = configRunnerTabs.filter { $0.state == .failed }.count
+        let stopped = configRunnerTabs.filter { $0.state != .running && $0.state != .failed }.count
+
+        HStack(spacing: 8) {
+            if running > 0 {
+                HStack(spacing: 3) {
+                    Circle().fill(.green).frame(width: 6, height: 6)
+                    Text("\(running) running").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if failed > 0 {
+                HStack(spacing: 3) {
+                    Circle().fill(.red).frame(width: 6, height: 6)
+                    Text("\(failed) failed").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if stopped > 0 && (running > 0 || failed > 0) {
+                HStack(spacing: 3) {
+                    Circle().fill(.secondary).frame(width: 6, height: 6)
+                    Text("\(stopped) stopped").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var runConfigSummaryText: String {
+        let count = worktree.project?.profile?.runConfigurations.count ?? 0
+        return "\(count) runner\(count == 1 ? "" : "s") available"
     }
 
     // MARK: - Diff Panel
