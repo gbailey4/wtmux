@@ -1,6 +1,5 @@
 import SwiftUI
-import SwiftTerm
-import AppKit
+import WebKit
 
 public struct TerminalRepresentable: NSViewRepresentable {
     let session: TerminalSession
@@ -9,74 +8,117 @@ public struct TerminalRepresentable: NSViewRepresentable {
         self.session = session
     }
 
-    public func makeNSView(context: Context) -> LocalProcessTerminalView {
-        let terminalView = DeferredStartTerminalView(frame: .zero)
-        terminalView.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+    public func makeCoordinator() -> Coordinator {
+        Coordinator(session: session)
+    }
 
-        let shell = session.shellPath
-        let env = Terminal.getEnvironmentVariables(termName: "xterm-256color")
-        let shellName = "-" + (shell as NSString).lastPathComponent
-        let session = self.session
+    public func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        let userContent = config.userContentController
+        let coordinator = context.coordinator
 
-        terminalView.deferProcessStart { [weak terminalView] in
-            guard let terminalView else { return }
-            terminalView.startProcess(
-                executable: shell,
-                args: [],
-                environment: env,
-                execName: shellName,
-                currentDirectory: session.workingDirectory
-            )
-            session.localProcess = terminalView.process
+        userContent.add(coordinator, name: "terminalReady")
+        userContent.add(coordinator, name: "terminalInput")
+        userContent.add(coordinator, name: "terminalResize")
+        config.preferences.setValue(true, forKey: "developerExtrasEnabled")
 
-            // After layout fully settles, force the shell to re-query terminal
-            // dimensions and redraw. This fixes rendering corruption from
-            // intermediate sizes during SwiftUI layout animations.
-            let pid = terminalView.process.shellPid
-            if pid > 0 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    kill(pid, SIGWINCH)
-                }
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.setValue(false, forKey: "drawsBackground")
+        coordinator.webView = webView
+
+        guard let htmlURL = Bundle.module.url(
+            forResource: "terminal",
+            withExtension: "html",
+            subdirectory: "Resources"
+        ) else {
+            return webView
+        }
+
+        let resourceDir = htmlURL.deletingLastPathComponent()
+        webView.loadFileURL(htmlURL, allowingReadAccessTo: resourceDir)
+        return webView
+    }
+
+    public func updateNSView(_ nsView: WKWebView, context: Context) {
+        // Terminal persists — no updates needed on re-render
+    }
+
+    public final class Coordinator: NSObject, WKScriptMessageHandler, @unchecked Sendable {
+        let session: TerminalSession
+        weak var webView: WKWebView?
+
+        init(session: TerminalSession) {
+            self.session = session
+        }
+
+        public func userContentController(
+            _ userContentController: WKUserContentController,
+            didReceive message: WKScriptMessage
+        ) {
+            switch message.name {
+            case "terminalReady":
+                handleReady(message.body)
+            case "terminalInput":
+                handleInput(message.body)
+            case "terminalResize":
+                handleResize(message.body)
+            default:
+                break
             }
         }
 
-        return terminalView
-    }
+        private func handleReady(_ body: Any) {
+            guard let json = body as? String,
+                  let data = json.data(using: .utf8),
+                  let dims = try? JSONDecoder().decode(TerminalDimensions.self, from: data) else {
+                return
+            }
 
-    public func updateNSView(_ nsView: LocalProcessTerminalView, context: Context) {
-        // Terminal persists — no updates needed on re-render
+            let pty = PTYProcess()
+            session.ptyProcess = pty
+
+            pty.onOutput = { [weak self] data in
+                guard let self else { return }
+                let base64 = data.base64EncodedString()
+                DispatchQueue.main.async { [weak self] in
+                    self?.webView?.evaluateJavaScript("window.terminalWrite('\(base64)')")
+                }
+            }
+
+            var env = ProcessInfo.processInfo.environment
+            env["TERM"] = "xterm-256color"
+            env["COLORTERM"] = "truecolor"
+            let envStrings = env.map { "\($0.key)=\($0.value)" }
+
+            pty.start(
+                executable: session.shellPath,
+                environment: envStrings,
+                currentDirectory: session.workingDirectory,
+                cols: UInt16(dims.cols),
+                rows: UInt16(dims.rows)
+            )
+        }
+
+        private func handleInput(_ body: Any) {
+            guard let base64 = body as? String,
+                  let data = Data(base64Encoded: base64) else {
+                return
+            }
+            session.ptyProcess?.write(data)
+        }
+
+        private func handleResize(_ body: Any) {
+            guard let json = body as? String,
+                  let data = json.data(using: .utf8),
+                  let dims = try? JSONDecoder().decode(TerminalDimensions.self, from: data) else {
+                return
+            }
+            session.ptyProcess?.resize(cols: UInt16(dims.cols), rows: UInt16(dims.rows))
+        }
     }
 }
 
-/// Defers shell process startup until the view's layout has fully settled,
-/// ensuring the PTY gets correct initial terminal dimensions.
-///
-/// SwiftUI layout can span multiple run loop iterations (e.g. NavigationSplitView
-/// animations). Each setFrameSize call resets a 50ms debounce timer. The process
-/// starts only after no setFrameSize has been called for 50ms, meaning layout
-/// has stabilized and the frame reflects the actual visible area.
-private final class DeferredStartTerminalView: LocalProcessTerminalView {
-    private var pendingStart: (() -> Void)?
-
-    func deferProcessStart(_ start: @escaping () -> Void) {
-        pendingStart = start
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        guard pendingStart != nil, newSize.width > 0, newSize.height > 0 else { return }
-
-        NSObject.cancelPreviousPerformRequests(
-            withTarget: self,
-            selector: #selector(fireStart),
-            object: nil
-        )
-        perform(#selector(fireStart), with: nil, afterDelay: 0.05)
-    }
-
-    @objc private func fireStart() {
-        guard let start = pendingStart else { return }
-        pendingStart = nil
-        start()
-    }
+private struct TerminalDimensions: Decodable {
+    let cols: Int
+    let rows: Int
 }

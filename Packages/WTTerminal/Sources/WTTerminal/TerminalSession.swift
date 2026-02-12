@@ -1,5 +1,4 @@
 import Foundation
-import SwiftTerm
 
 public final class TerminalSession: Identifiable, @unchecked Sendable {
     public let id: String
@@ -7,8 +6,7 @@ public final class TerminalSession: Identifiable, @unchecked Sendable {
     public let workingDirectory: String
     public let shellPath: String
 
-    nonisolated(unsafe) public var localProcess: LocalProcess?
-    nonisolated(unsafe) public var terminal: Terminal?
+    nonisolated(unsafe) public var ptyProcess: PTYProcess?
 
     public init(
         id: String,

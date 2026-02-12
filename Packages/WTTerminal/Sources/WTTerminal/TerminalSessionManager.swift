@@ -30,10 +30,14 @@ public final class TerminalSessionManager: @unchecked Sendable {
     }
 
     public func removeSession(id: String) {
+        sessions[id]?.ptyProcess?.stop()
         sessions.removeValue(forKey: id)
     }
 
     public func removeAll() {
+        for session in sessions.values {
+            session.ptyProcess?.stop()
+        }
         sessions.removeAll()
     }
 }
