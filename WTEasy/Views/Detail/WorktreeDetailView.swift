@@ -83,8 +83,10 @@ struct WorktreeDetailView: View {
 
                 // Diff overlay — shown when a file is selected from the outline
                 if let file = activeDiffFile {
-                    DiffContentView(file: file, onClose: { activeDiffFile = nil })
-                        .background(.background)
+                    DiffContentView(file: file, onClose: { activeDiffFile = nil }) {
+                        openInEditorMenu(relativePath: file.displayPath)
+                    }
+                    .background(.background)
                 }
             }
 
@@ -168,6 +170,28 @@ struct WorktreeDetailView: View {
             workingDirectory: worktree.path,
             initialCommand: startCommand
         )
+    }
+
+    // MARK: - Open In Editor
+
+    @ViewBuilder
+    private func openInEditorMenu(relativePath: String) -> some View {
+        let editors = ExternalEditor.installedEditors(custom: ExternalEditor.customEditors)
+        if !editors.isEmpty {
+            Menu {
+                ForEach(editors) { editor in
+                    Button(editor.name) {
+                        let fileURL = URL(fileURLWithPath: worktree.path)
+                            .appendingPathComponent(relativePath)
+                        ExternalEditor.open(fileURL: fileURL, editor: editor)
+                    }
+                }
+            } label: {
+                Image(systemName: "arrow.up.forward.square")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
     }
 
     // MARK: - Run Actions

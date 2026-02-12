@@ -6,6 +6,8 @@ struct SettingsView: View {
     @AppStorage("terminalFontSize") private var terminalFontSize = 13.0
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
 
+    @State private var customEditors = ExternalEditor.customEditors
+
     var body: some View {
         Form {
             Section("Terminal") {
@@ -28,6 +30,29 @@ struct SettingsView: View {
                         .tag(theme.id)
                     }
                 }
+            }
+
+            Section("Editors") {
+                ForEach($customEditors) { $editor in
+                    HStack {
+                        TextField("Name", text: $editor.name)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 150)
+                        TextField("Bundle ID", text: $editor.bundleId)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+                .onDelete { offsets in
+                    customEditors.remove(atOffsets: offsets)
+                    ExternalEditor.customEditors = customEditors
+                }
+
+                Button("Add Editor") {
+                    customEditors.append(ExternalEditor(name: "", bundleId: ""))
+                }
+            }
+            .onChange(of: customEditors) {
+                ExternalEditor.customEditors = customEditors
             }
         }
         .formStyle(.grouped)

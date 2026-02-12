@@ -1,16 +1,26 @@
 import SwiftUI
 import HighlightSwift
 
-public struct DiffContentView: View {
+public struct DiffContentView<HeaderAccessory: View>: View {
     let file: DiffFile
     var onClose: () -> Void
+    @ViewBuilder var headerAccessory: () -> HeaderAccessory
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var highlightedLines: [String: AttributedString] = [:]
 
-    public init(file: DiffFile, onClose: @escaping () -> Void) {
+    public init(file: DiffFile, onClose: @escaping () -> Void)
+        where HeaderAccessory == EmptyView {
         self.file = file
         self.onClose = onClose
+        self.headerAccessory = { EmptyView() }
+    }
+
+    public init(file: DiffFile, onClose: @escaping () -> Void,
+                @ViewBuilder headerAccessory: @escaping () -> HeaderAccessory) {
+        self.file = file
+        self.onClose = onClose
+        self.headerAccessory = headerAccessory
     }
 
     public var body: some View {
@@ -18,18 +28,20 @@ public struct DiffContentView: View {
             headerBar
             Divider()
 
-            ScrollView([.horizontal, .vertical]) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(file.hunks) { hunk in
-                        hunkHeader(hunk)
-                        ForEach(hunk.lines) { line in
-                            diffLine(line)
+            GeometryReader { proxy in
+                ScrollView([.horizontal, .vertical]) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(file.hunks) { hunk in
+                            hunkHeader(hunk)
+                            ForEach(hunk.lines) { line in
+                                diffLine(line)
+                            }
                         }
                     }
+                    .frame(minWidth: 600, minHeight: proxy.size.height, alignment: .top)
                 }
-                .frame(minWidth: 600)
+                .font(.system(size: 12, weight: .regular, design: .monospaced))
             }
-            .font(.system(size: 12, weight: .regular, design: .monospaced))
         }
         .task(id: "\(file.id)-\(colorScheme)") {
             await highlightFile()
@@ -46,6 +58,7 @@ public struct DiffContentView: View {
                 .lineLimit(1)
                 .truncationMode(.head)
             Spacer()
+            headerAccessory()
             Button { onClose() } label: {
                 Image(systemName: "xmark")
             }

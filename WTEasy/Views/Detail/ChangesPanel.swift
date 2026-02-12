@@ -278,10 +278,57 @@ struct ChangesPanel: View {
                 diffOutput = try await git.commitDiff(hash: groupId)
             }
             let parser = DiffParser()
-            diffCache[groupId] = parser.parse(diffOutput)
+            var parsed = parser.parse(diffOutput)
+
+            // Synthesize diffs for untracked files (git diff doesn't include them)
+            if groupId == "working-changes" {
+                let workingFiles = changeGroups.first(where: { $0.id == "working-changes" })?.files ?? []
+                for file in workingFiles where file.status == .untracked {
+                    guard !parsed.contains(where: { $0.displayPath == file.path || $0.id == file.path }) else { continue }
+                    if let synthetic = syntheticDiffFile(relativePath: file.path) {
+                        parsed.append(synthetic)
+                    }
+                }
+            }
+
+            diffCache[groupId] = parsed
         } catch {
             diffCache[groupId] = []
         }
+    }
+
+    private func syntheticDiffFile(relativePath: String) -> DiffFile? {
+        let fullPath = (worktree.path as NSString).appendingPathComponent(relativePath)
+        guard let content = try? String(contentsOfFile: fullPath, encoding: .utf8) else { return nil }
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
+
+        var diffLines: [DiffLine] = []
+        for (i, line) in lines.enumerated() {
+            diffLines.append(DiffLine(
+                id: "0-\(i)",
+                kind: .addition,
+                content: String(line),
+                oldLineNumber: nil,
+                newLineNumber: i + 1
+            ))
+        }
+
+        let hunk = DiffHunk(
+            id: "0",
+            header: "@@ -0,0 +1,\(lines.count) @@",
+            oldStart: 0,
+            oldCount: 0,
+            newStart: 1,
+            newCount: lines.count,
+            lines: diffLines
+        )
+
+        return DiffFile(
+            id: relativePath,
+            oldPath: "/dev/null",
+            newPath: relativePath,
+            hunks: [hunk]
+        )
     }
 
     private func refresh() async {

@@ -6,6 +6,13 @@ public struct DiffFile: Identifiable, Sendable {
     public let newPath: String
     public let hunks: [DiffHunk]
 
+    public init(id: String, oldPath: String, newPath: String, hunks: [DiffHunk]) {
+        self.id = id
+        self.oldPath = oldPath
+        self.newPath = newPath
+        self.hunks = hunks
+    }
+
     public var displayPath: String {
         newPath == "/dev/null" ? oldPath : newPath
     }
@@ -19,6 +26,16 @@ public struct DiffHunk: Identifiable, Sendable {
     public let newStart: Int
     public let newCount: Int
     public let lines: [DiffLine]
+
+    public init(id: String, header: String, oldStart: Int, oldCount: Int, newStart: Int, newCount: Int, lines: [DiffLine]) {
+        self.id = id
+        self.header = header
+        self.oldStart = oldStart
+        self.oldCount = oldCount
+        self.newStart = newStart
+        self.newCount = newCount
+        self.lines = lines
+    }
 }
 
 public struct DiffLine: Identifiable, Sendable {
@@ -33,6 +50,14 @@ public struct DiffLine: Identifiable, Sendable {
     public let content: String
     public let oldLineNumber: Int?
     public let newLineNumber: Int?
+
+    public init(id: String, kind: Kind, content: String, oldLineNumber: Int?, newLineNumber: Int?) {
+        self.id = id
+        self.kind = kind
+        self.content = content
+        self.oldLineNumber = oldLineNumber
+        self.newLineNumber = newLineNumber
+    }
 }
 
 public struct DiffParser: Sendable {

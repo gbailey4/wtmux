@@ -11,10 +11,11 @@ struct ContentView: View {
     @State private var showingAddProject = false
     @State private var showRightPanel = false
     @State private var showRunnerPanel = false
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var terminalSessionManager = TerminalSessionManager()
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(
                 projects: projects,
                 selectedWorktreeID: $selectedWorktreeID,
