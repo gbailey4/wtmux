@@ -1,0 +1,86 @@
+name: WTEasy
+options:
+  bundleIdPrefix: com.grahampark
+  deploymentTarget:
+    macOS: "15.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+  groupSortPosition: top
+
+packages:
+  WTCore:
+    path: Packages/WTCore
+  WTTransport:
+    path: Packages/WTTransport
+  WTGit:
+    path: Packages/WTGit
+  WTProcess:
+    path: Packages/WTProcess
+  WTTerminal:
+    path: Packages/WTTerminal
+  WTDiff:
+    path: Packages/WTDiff
+
+targets:
+  WTEasy:
+    type: application
+    platform: macOS
+    sources:
+      - path: WTEasy
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.grahampark.wteasy
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+        SWIFT_VERSION: 6.0
+        ENABLE_PREVIEWS: YES
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: NO
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+        SWIFT_STRICT_CONCURRENCY: complete
+        MACOSX_DEPLOYMENT_TARGET: "15.0"
+      configs:
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+    dependencies:
+      - package: WTCore
+      - package: WTTransport
+      - package: WTGit
+      - package: WTProcess
+      - package: WTTerminal
+      - package: WTDiff
+    info:
+      path: WTEasy/Info.plist
+      properties:
+        CFBundleName: WTEasy
+        CFBundleDisplayName: WTEasy
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundlePackageType: APPL
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        LSApplicationCategoryType: public.app-category.developer-tools
+    entitlements:
+      path: WTEasy/WTEasy.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+
+schemes:
+  WTEasy:
+    build:
+      targets:
+        WTEasy: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

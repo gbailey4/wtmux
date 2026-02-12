@@ -1,0 +1,18 @@
+# Xcode
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+DerivedData/
+
+# XcodeGen - generated project can be regenerated
+WTEasy.xcodeproj/
+
+# SPM
+.build/
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# Claude Code local settings
+.claude/settings.local.json
