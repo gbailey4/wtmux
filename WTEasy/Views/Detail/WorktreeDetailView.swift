@@ -1,5 +1,6 @@
 import SwiftUI
 import WTCore
+import WTDiff
 import WTTerminal
 
 struct WorktreeDetailView: View {
@@ -10,9 +11,12 @@ struct WorktreeDetailView: View {
 
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
 
+    @State private var activeDiffFile: DiffFile?
     @State private var showRunnerConflictAlert = false
     @State private var conflictingWorktreeName: String = ""
     @State private var conflictingPorts: [Int] = []
+    @State private var showCloseTabAlert = false
+    @State private var pendingCloseSessionId: String?
 
     private var currentTheme: TerminalTheme {
         TerminalThemes.theme(forId: terminalThemeId)
@@ -58,33 +62,55 @@ struct WorktreeDetailView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // Center: Main terminal tabs + runner terminals
-            VStack(spacing: 0) {
-                // Main terminal with tabs
-                tabbedTerminalView
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            ZStack {
+                // Center: Main terminal tabs + runner terminals
+                VStack(spacing: 0) {
+                    // Main terminal with tabs
+                    tabbedTerminalView
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                // Bottom: Runner terminal panel
-                if showRunnerPanel && !allRunnerSessions.isEmpty {
-                    Divider()
-                    runnerTerminalsView
-                        .frame(maxWidth: .infinity)
-                        .frame(minHeight: 150, idealHeight: 250, maxHeight: 350)
-                } else if !configRunnerTabs.isEmpty || hasRunConfigurations {
-                    Divider()
-                    runnerStatusBar
+                    // Bottom: Runner terminal panel
+                    if showRunnerPanel && !allRunnerSessions.isEmpty {
+                        Divider()
+                        runnerTerminalsView
+                            .frame(maxWidth: .infinity)
+                            .frame(minHeight: 150, idealHeight: 250, maxHeight: 350)
+                    } else if !configRunnerTabs.isEmpty || hasRunConfigurations {
+                        Divider()
+                        runnerStatusBar
+                    }
+                }
+
+                // Diff overlay — shown when a file is selected from the outline
+                if let file = activeDiffFile {
+                    DiffContentView(file: file, onClose: { activeDiffFile = nil })
+                        .background(.background)
                 }
             }
 
-            // Right panel: Diff viewer
+            // Right panel: Changes outline
             if showRightPanel {
                 Divider()
-                diffPanelView
+                ChangesPanel(worktree: worktree, activeDiffFile: $activeDiffFile)
                     .frame(width: 400)
             }
         }
         .task(id: worktreeId) {
+            activeDiffFile = nil
             await ensureFirstTab()
+        }
+        .alert("Close Terminal?", isPresented: $showCloseTabAlert) {
+            Button("Close", role: .destructive) {
+                if let id = pendingCloseSessionId {
+                    terminalSessionManager.removeTab(sessionId: id)
+                    pendingCloseSessionId = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingCloseSessionId = nil
+            }
+        } message: {
+            Text("This terminal has a running process. Closing it will terminate the process.")
         }
         .alert("Runners Already Active", isPresented: $showRunnerConflictAlert) {
             Button("Stop & Switch") {
@@ -313,7 +339,12 @@ struct WorktreeDetailView: View {
 
             if terminalTabs.count > 1 {
                 Button {
-                    terminalSessionManager.removeTab(sessionId: session.id)
+                    if session.terminalView?.hasChildProcesses() == true {
+                        pendingCloseSessionId = session.id
+                        showCloseTabAlert = true
+                    } else {
+                        terminalSessionManager.removeTab(sessionId: session.id)
+                    }
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 8, weight: .bold))
@@ -538,10 +569,4 @@ struct WorktreeDetailView: View {
         return "\(count) runner\(count == 1 ? "" : "s") available"
     }
 
-    // MARK: - Diff Panel
-
-    @ViewBuilder
-    private var diffPanelView: some View {
-        ChangesPanel(worktree: worktree)
-    }
 }

@@ -33,13 +33,13 @@ enum ChangeGroup: Identifiable {
 
 struct ChangesPanel: View {
     let worktree: Worktree
+    @Binding var activeDiffFile: DiffFile?
 
     @State private var changeGroups: [ChangeGroup] = []
     @State private var diffCache: [String: [DiffFile]] = [:]
     @State private var selectedFile: SelectedFile?
     @State private var expandedGroups: Set<String> = ["working-changes"]
     @State private var isLoading = false
-    @State private var loadingDiffGroup: String?
     @State private var commitFileCache: [String: [GitFileStatus]] = [:]
 
     private var git: GitService {
@@ -61,15 +61,16 @@ struct ChangesPanel: View {
                     description: Text("Working directory is clean and no commits ahead of \(worktree.baseBranch)")
                 )
             } else {
-                HSplitView {
-                    outlineView
-                        .frame(minWidth: 150)
-                    diffContentView
-                }
+                outlineView
             }
         }
         .task(id: worktree.branchName) {
             await loadAllChanges()
+        }
+        .onChange(of: activeDiffFile?.id) { _, newValue in
+            if newValue == nil {
+                selectedFile = nil
+            }
         }
     }
 
@@ -111,7 +112,13 @@ struct ChangesPanel: View {
                 let groupId = String(parts[0])
                 let path = String(parts[1])
                 selectedFile = SelectedFile(groupId: groupId, path: path)
-                Task { await loadDiffIfNeeded(groupId: groupId) }
+                Task {
+                    await loadDiffIfNeeded(groupId: groupId)
+                    if let diffFiles = diffCache[groupId],
+                       let file = diffFiles.first(where: { $0.displayPath == path || $0.id == path }) {
+                        activeDiffFile = file
+                    }
+                }
             }
         )) {
             ForEach(changeGroups) { group in
@@ -210,26 +217,6 @@ struct ChangesPanel: View {
         }
     }
 
-    // MARK: - Diff Content
-
-    @ViewBuilder
-    private var diffContentView: some View {
-        if let selected = selectedFile,
-           let diffFiles = diffCache[selected.groupId],
-           let diffFile = diffFiles.first(where: { $0.displayPath == selected.path || $0.id == selected.path }) {
-            InlineDiffView(file: diffFile)
-        } else if loadingDiffGroup != nil {
-            ProgressView("Loading diff...")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            ContentUnavailableView(
-                "Select a File",
-                systemImage: "doc.text",
-                description: Text("Choose a file to view its diff")
-            )
-        }
-    }
-
     // MARK: - Data Loading
 
     private func loadAllChanges() async {
@@ -282,8 +269,6 @@ struct ChangesPanel: View {
 
     private func loadDiffIfNeeded(groupId: String) async {
         guard diffCache[groupId] == nil else { return }
-        loadingDiffGroup = groupId
-        defer { loadingDiffGroup = nil }
 
         do {
             let diffOutput: String
@@ -303,6 +288,7 @@ struct ChangesPanel: View {
         diffCache = [:]
         commitFileCache = [:]
         selectedFile = nil
+        activeDiffFile = nil
         await loadAllChanges()
     }
 

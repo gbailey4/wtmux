@@ -173,6 +173,17 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
         return output
     }
 
+    // MARK: - Child process detection
+
+    /// Returns `true` when the shell has active child processes (e.g. ssh, node, python).
+    public func hasChildProcesses() -> Bool {
+        guard let pid = process?.shellPid, pid > 0 else { return false }
+        var childPids = [pid_t](repeating: 0, count: 256)
+        let bufferSize = Int32(MemoryLayout<pid_t>.size * childPids.count)
+        let count = proc_listchildpids(pid, &childPids, bufferSize)
+        return count > 0
+    }
+
     // MARK: - Process lifecycle
 
     public override func processTerminated(_ source: SwiftTerm.LocalProcess, exitCode: Int32?) {
