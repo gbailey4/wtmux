@@ -13,11 +13,15 @@ struct WorktreeDetailView: View {
 
     @State private var diffFiles: [DiffFile] = []
     @State private var selectedDiffFile: DiffFile?
+    @State private var showRunnerConflictAlert = false
+    @State private var conflictingWorktreeName: String = ""
+    @State private var conflictingPorts: [Int] = []
 
     private var worktreeId: String { worktree.branchName }
 
     private var terminalTabs: [TerminalSession] {
         terminalSessionManager.sessions(forWorktree: worktreeId)
+            .filter { !$0.id.hasPrefix("runner-") }
     }
 
     private var activeTabId: String? {
@@ -71,7 +75,7 @@ struct WorktreeDetailView: View {
             }
         }
         .task(id: worktreeId) {
-            ensureFirstTab()
+            await ensureFirstTab()
             if showRightPanel {
                 await loadDiff()
             }
@@ -81,20 +85,91 @@ struct WorktreeDetailView: View {
                 Task { await loadDiff() }
             }
         }
+        .alert("Runners Already Active", isPresented: $showRunnerConflictAlert) {
+            Button("Stop & Switch") {
+                stopConflictingAndStartRunners()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            if conflictingPorts.isEmpty {
+                Text("Worktree \"\(conflictingWorktreeName)\" is already running. Starting runners here may cause port conflicts.")
+            } else {
+                let ports = conflictingPorts.map(String.init).joined(separator: ", ")
+                Text("Worktree \"\(conflictingWorktreeName)\" is already using port\(conflictingPorts.count > 1 ? "s" : "") \(ports). Stop its runners and start here instead?")
+            }
+        }
     }
 
-    private func ensureFirstTab() {
-        if terminalSessionManager.sessions(forWorktree: worktreeId).isEmpty {
-            _ = terminalSessionManager.createTab(
-                forWorktree: worktreeId,
-                workingDirectory: worktree.path
-            )
+    private func ensureFirstTab() async {
+        guard terminalSessionManager.sessions(forWorktree: worktreeId).isEmpty else { return }
+
+        var setupCommand: String?
+        if worktree.needsSetup == true, let repoPath = worktree.project?.repoPath {
+            let applicator = ProfileApplicator()
+            if let config = await applicator.loadConfig(forRepo: repoPath) {
+                let commands = config.setupCommands.filter { !$0.isEmpty }
+                if !commands.isEmpty {
+                    setupCommand = commands.joined(separator: " && ")
+                }
+            }
+            worktree.needsSetup = false
         }
+
+        _ = terminalSessionManager.createTab(
+            forWorktree: worktreeId,
+            workingDirectory: worktree.path,
+            initialCommand: setupCommand
+        )
     }
 
     // MARK: - Run Actions
 
     private func startRunners() {
+        // Check for runners already active on another worktree in the same project
+        if let conflict = conflictingWorktree() {
+            conflictingWorktreeName = conflict.name
+            conflictingPorts = conflictingPortList()
+            showRunnerConflictAlert = true
+            return
+        }
+        launchRunners()
+    }
+
+    /// Finds another worktree in the same project that has running runners.
+    private func conflictingWorktree() -> (name: String, id: String)? {
+        guard let project = worktree.project else { return nil }
+        let _ = terminalSessionManager.runnerStateVersion
+        let siblingIds = project.worktrees
+            .map(\.branchName)
+            .filter { $0 != worktreeId }
+        for siblingId in siblingIds {
+            let runners = terminalSessionManager.runnerSessions(forWorktree: siblingId)
+            if runners.contains(where: { $0.isProcessRunning }) {
+                return (name: siblingId, id: siblingId)
+            }
+        }
+        return nil
+    }
+
+    /// Returns ports configured for this project's run configurations.
+    private func conflictingPortList() -> [Int] {
+        guard let configs = worktree.project?.profile?.runConfigurations else { return [] }
+        return configs.compactMap(\.port).sorted()
+    }
+
+    private func stopConflictingAndStartRunners() {
+        guard let project = worktree.project else { return }
+        // Stop runners on all other worktrees in this project
+        for sibling in project.worktrees where sibling.branchName != worktreeId {
+            for session in terminalSessionManager.runnerSessions(forWorktree: sibling.branchName) {
+                terminalSessionManager.stopSession(id: session.id)
+            }
+            terminalSessionManager.removeRunnerSessions(forWorktree: sibling.branchName)
+        }
+        launchRunners()
+    }
+
+    private func launchRunners() {
         guard let configs = worktree.project?.profile?.runConfigurations
             .sorted(by: { $0.order < $1.order }) else { return }
         for config in configs where !config.command.isEmpty {
@@ -298,10 +373,12 @@ struct WorktreeDetailView: View {
 
     @ViewBuilder
     private func runnerTab(session: TerminalSession) -> some View {
+        // Read runnerStateVersion so SwiftUI re-renders when stop/restart is called
+        let _ = terminalSessionManager.runnerStateVersion
         HStack(spacing: 4) {
             // Running indicator dot
             Circle()
-                .fill(.green)
+                .fill(session.isProcessRunning ? .green : .secondary)
                 .frame(width: 6, height: 6)
 
             Button {

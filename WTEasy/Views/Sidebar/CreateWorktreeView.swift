@@ -85,12 +85,26 @@ struct CreateWorktreeView: View {
                     baseBranch: baseBranch
                 )
 
+                // Apply profile: copy env files from main repo to new worktree
+                let applicator = ProfileApplicator()
+                let config = await applicator.loadConfig(forRepo: project.repoPath)
+                if let config {
+                    applicator.applyEnvFiles(
+                        config: config,
+                        repoPath: project.repoPath,
+                        worktreePath: worktreePath
+                    )
+                }
+
                 let worktree = Worktree(
                     branchName: branchName,
                     path: worktreePath,
                     baseBranch: baseBranch,
                     status: .ready
                 )
+                if let config, !config.setupCommands.isEmpty {
+                    worktree.needsSetup = true
+                }
                 worktree.project = project
                 modelContext.insert(worktree)
                 try? modelContext.save()

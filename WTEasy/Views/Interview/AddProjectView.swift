@@ -122,9 +122,14 @@ struct AddProjectView: View {
                 TextField("Default Branch", text: $defaultBranch)
                     .textFieldStyle(.roundedBorder)
 
-                TextField("Worktree Base Path", text: $worktreeBasePath)
-                    .textFieldStyle(.roundedBorder)
-                    .help("Directory where worktrees will be created")
+                HStack {
+                    TextField("Worktree Base Path", text: $worktreeBasePath)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Browse...") {
+                        browseWorktreeBasePath()
+                    }
+                }
+                .help("Directory where worktrees will be created")
             }
 
             Section("Connection") {
@@ -160,6 +165,11 @@ struct AddProjectView: View {
                 if detectedEnvFiles.isEmpty {
                     Text("No .env files detected")
                         .foregroundStyle(.secondary)
+                }
+                Button {
+                    browseForEnvFiles()
+                } label: {
+                    Label("Browse...", systemImage: "folder")
                 }
             }
 
@@ -321,17 +331,9 @@ struct AddProjectView: View {
             defaultBranch = branch
         }
 
-        // Detect .env files
-        let envResult = try? await transport.execute(
-            "ls -a \(repoPath) | grep '^\\.env'",
-            in: repoPath
-        )
-        if let envResult, envResult.succeeded {
-            detectedEnvFiles = envResult.stdout
-                .split(separator: "\n")
-                .map(String.init)
-            selectedEnvFiles = Set(detectedEnvFiles)
-        }
+        // Detect .env files recursively
+        detectedEnvFiles = EnvFileScanner.scan(repoPath: repoPath)
+        selectedEnvFiles = Set(detectedEnvFiles)
 
         // Detect package.json scripts
         let packageJsonPath = "\(repoPath)/package.json"
@@ -440,7 +442,75 @@ struct AddProjectView: View {
         modelContext.insert(project)
         try? modelContext.save()
 
+        // Write .wteasy/config.json and update .gitignore
+        Task {
+            let configService = ConfigService()
+            let config = ProjectConfig(
+                envFilesToCopy: Array(selectedEnvFiles),
+                setupCommands: setupCommands.filter { !$0.isEmpty },
+                runConfigurations: runConfigurations
+                    .enumerated()
+                    .filter { !$0.element.name.isEmpty }
+                    .map { index, rc in
+                        ProjectConfig.RunConfig(
+                            name: rc.name,
+                            command: rc.command,
+                            port: Int(rc.portString),
+                            autoStart: rc.autoStart,
+                            order: index
+                        )
+                    }
+            )
+            try? await configService.writeConfig(config, forRepo: repoPath)
+            try? await configService.ensureGitignore(forRepo: repoPath)
+        }
+
         dismiss()
+    }
+
+    private func browseWorktreeBasePath() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.message = "Select worktree base directory"
+        if !repoPath.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: repoPath).deletingLastPathComponent()
+        }
+
+        if panel.runModal() == .OK, let url = panel.url {
+            worktreeBasePath = url.path
+        }
+    }
+
+    private func browseForEnvFiles() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = true
+        panel.message = "Select environment files to copy to new worktrees"
+        panel.directoryURL = URL(fileURLWithPath: repoPath)
+
+        if panel.runModal() == .OK {
+            let repoURL = URL(fileURLWithPath: repoPath)
+            for url in panel.urls {
+                if let relative = url.path.hasPrefix(repoURL.path)
+                    ? String(url.path.dropFirst(repoURL.path.count + 1))
+                    : nil, !relative.isEmpty {
+                    if !detectedEnvFiles.contains(relative) {
+                        detectedEnvFiles.append(relative)
+                    }
+                    selectedEnvFiles.insert(relative)
+                } else {
+                    let name = url.lastPathComponent
+                    if !detectedEnvFiles.contains(name) {
+                        detectedEnvFiles.append(name)
+                    }
+                    selectedEnvFiles.insert(name)
+                }
+            }
+        }
     }
 
     private func stepTitle(_ step: InterviewStep) -> String {

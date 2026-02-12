@@ -9,6 +9,9 @@ public final class TerminalSession: Identifiable, @unchecked Sendable {
     public let shellPath: String
     public var initialCommand: String?
 
+    /// Whether the runner command is currently active (not the shell itself).
+    public var isProcessRunning: Bool
+
     nonisolated(unsafe) public var terminalView: DeferredStartTerminalView?
 
     public init(
@@ -25,5 +28,6 @@ public final class TerminalSession: Identifiable, @unchecked Sendable {
         self.workingDirectory = workingDirectory
         self.shellPath = shellPath
         self.initialCommand = initialCommand
+        self.isProcessRunning = initialCommand != nil
     }
 }

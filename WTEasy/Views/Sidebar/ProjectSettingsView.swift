@@ -58,9 +58,14 @@ struct ProjectSettingsView: View {
                     TextField("Default Branch", text: $defaultBranch)
                         .textFieldStyle(.roundedBorder)
 
-                    TextField("Worktree Base Path", text: $worktreeBasePath)
-                        .textFieldStyle(.roundedBorder)
-                        .help("Directory where worktrees will be created")
+                    HStack {
+                        TextField("Worktree Base Path", text: $worktreeBasePath)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Browse...") {
+                            browseWorktreeBasePath()
+                        }
+                    }
+                    .help("Directory where worktrees will be created")
                 }
 
                 Section("Connection") {
@@ -169,6 +174,38 @@ struct ProjectSettingsView: View {
             .padding()
         }
         .frame(width: 550, height: 600)
+        .task {
+            // Load from .wteasy/config.json if available (source of truth over SwiftData)
+            let configService = ConfigService()
+            if let config = await configService.readConfig(forRepo: project.repoPath) {
+                envFilesToCopy = config.envFilesToCopy
+                setupCommands = config.setupCommands
+                runConfigurations = config.runConfigurations.map { rc in
+                    EditableRunConfig(
+                        name: rc.name,
+                        command: rc.command,
+                        portString: rc.port.map(String.init) ?? "",
+                        autoStart: rc.autoStart
+                    )
+                }
+            }
+        }
+    }
+
+    private func browseWorktreeBasePath() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.message = "Select worktree base directory"
+        if !repoPath.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: repoPath).deletingLastPathComponent()
+        }
+
+        if panel.runModal() == .OK, let url = panel.url {
+            worktreeBasePath = url.path
+        }
     }
 
     private func browseForEnvFiles() {
@@ -243,6 +280,29 @@ struct ProjectSettingsView: View {
             )
             rc.profile = profile
             profile.runConfigurations.append(rc)
+        }
+
+        // Write .wteasy/config.json
+        Task {
+            let configService = ConfigService()
+            let config = ProjectConfig(
+                envFilesToCopy: envFilesToCopy.filter { !$0.isEmpty },
+                setupCommands: setupCommands.filter { !$0.isEmpty },
+                runConfigurations: runConfigurations
+                    .enumerated()
+                    .filter { !$0.element.name.isEmpty }
+                    .map { index, rc in
+                        ProjectConfig.RunConfig(
+                            name: rc.name,
+                            command: rc.command,
+                            port: Int(rc.portString),
+                            autoStart: rc.autoStart,
+                            order: index
+                        )
+                    }
+            )
+            try? await configService.writeConfig(config, forRepo: repoPath)
+            try? await configService.ensureGitignore(forRepo: repoPath)
         }
     }
 }

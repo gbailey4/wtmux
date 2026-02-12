@@ -13,7 +13,8 @@ public final class TerminalSessionManager: @unchecked Sendable {
         title: String,
         worktreeId: String = "",
         workingDirectory: String,
-        shellPath: String = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        shellPath: String = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh",
+        initialCommand: String? = nil
     ) -> TerminalSession {
         if let existing = sessions[id] {
             return existing
@@ -23,7 +24,8 @@ public final class TerminalSessionManager: @unchecked Sendable {
             title: title,
             worktreeId: worktreeId,
             workingDirectory: workingDirectory,
-            shellPath: shellPath
+            shellPath: shellPath,
+            initialCommand: initialCommand
         )
         sessions[id] = session
         return session
@@ -39,7 +41,7 @@ public final class TerminalSessionManager: @unchecked Sendable {
             .sorted { $0.id < $1.id }
     }
 
-    public func createTab(forWorktree worktreeId: String, workingDirectory: String) -> TerminalSession {
+    public func createTab(forWorktree worktreeId: String, workingDirectory: String, initialCommand: String? = nil) -> TerminalSession {
         let count = (tabCounters[worktreeId] ?? 0) + 1
         tabCounters[worktreeId] = count
         let id = "tab-\(worktreeId)-\(count)"
@@ -48,7 +50,8 @@ public final class TerminalSessionManager: @unchecked Sendable {
             id: id,
             title: title,
             worktreeId: worktreeId,
-            workingDirectory: workingDirectory
+            workingDirectory: workingDirectory,
+            initialCommand: initialCommand
         )
         activeSessionId[worktreeId] = id
         return session
@@ -93,6 +96,8 @@ public final class TerminalSessionManager: @unchecked Sendable {
 
     /// Active runner tab per worktree (keyed by worktreeId).
     public private(set) var activeRunnerSessionId: [String: String] = [:]
+    /// Incremented when runner state changes, so views can observe updates.
+    public private(set) var runnerStateVersion: Int = 0
 
     public func createRunnerSession(
         id: String,
@@ -136,7 +141,7 @@ public final class TerminalSessionManager: @unchecked Sendable {
     }
 
     public func worktreeIdsWithRunners() -> Set<String> {
-        Set(sessions.values.filter { $0.id.hasPrefix("runner-") }.map(\.worktreeId))
+        Set(sessions.values.filter { $0.id.hasPrefix("runner-") && $0.isProcessRunning }.map(\.worktreeId))
     }
 
     public func removeRunnerSessions(forWorktree worktreeId: String) {
@@ -160,6 +165,8 @@ public final class TerminalSessionManager: @unchecked Sendable {
               let command = session.initialCommand else { return }
         // Send Ctrl+C
         view.send([0x03])
+        session.isProcessRunning = true
+        runnerStateVersion += 1
         // Re-send command after brief delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             view.sendCommand(command)
@@ -171,5 +178,7 @@ public final class TerminalSessionManager: @unchecked Sendable {
         guard let session = sessions[id],
               let view = session.terminalView else { return }
         view.send([0x03])
+        session.isProcessRunning = false
+        runnerStateVersion += 1
     }
 }

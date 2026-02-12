@@ -14,7 +14,9 @@ struct SidebarView: View {
     @State private var editingProject: Project?
 
     private var runningWorktreeIds: Set<String> {
-        terminalSessionManager.worktreeIdsWithRunners()
+        // Read runnerStateVersion to trigger re-evaluation when runners stop/restart
+        let _ = terminalSessionManager.runnerStateVersion
+        return terminalSessionManager.worktreeIdsWithRunners()
     }
 
     var body: some View {

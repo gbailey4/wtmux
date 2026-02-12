@@ -18,6 +18,7 @@ public final class Worktree {
     public var project: Project?
     public var createdAt: Date
     public var notes: String?
+    public var needsSetup: Bool?
 
     public var status: WorktreeStatus {
         get { WorktreeStatus(rawValue: statusRaw) ?? .error }
@@ -35,5 +36,6 @@ public final class Worktree {
         self.baseBranch = baseBranch
         self.statusRaw = status.rawValue
         self.createdAt = Date()
+        self.needsSetup = false
     }
 }
