@@ -4,22 +4,30 @@ import HighlightSwift
 public struct DiffContentView<HeaderAccessory: View>: View {
     let file: DiffFile
     var onClose: () -> Void
+    var backgroundColor: Color?
+    var foregroundColor: Color?
     @ViewBuilder var headerAccessory: () -> HeaderAccessory
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var highlightedLines: [String: AttributedString] = [:]
 
-    public init(file: DiffFile, onClose: @escaping () -> Void)
+    public init(file: DiffFile, onClose: @escaping () -> Void,
+                backgroundColor: Color? = nil, foregroundColor: Color? = nil)
         where HeaderAccessory == EmptyView {
         self.file = file
         self.onClose = onClose
+        self.backgroundColor = backgroundColor
+        self.foregroundColor = foregroundColor
         self.headerAccessory = { EmptyView() }
     }
 
     public init(file: DiffFile, onClose: @escaping () -> Void,
+                backgroundColor: Color? = nil, foregroundColor: Color? = nil,
                 @ViewBuilder headerAccessory: @escaping () -> HeaderAccessory) {
         self.file = file
         self.onClose = onClose
+        self.backgroundColor = backgroundColor
+        self.foregroundColor = foregroundColor
         self.headerAccessory = headerAccessory
     }
 
@@ -43,6 +51,7 @@ public struct DiffContentView<HeaderAccessory: View>: View {
                 .font(.system(size: 12, weight: .regular, design: .monospaced))
             }
         }
+        .background(backgroundColor ?? Color.clear)
         .task(id: "\(file.id)-\(colorScheme)") {
             await highlightFile()
         }
@@ -114,6 +123,7 @@ public struct DiffContentView<HeaderAccessory: View>: View {
                     .fixedSize(horizontal: true, vertical: false)
             } else {
                 Text(line.content)
+                    .foregroundStyle(foregroundColor ?? .primary)
                     .padding(.leading, 8)
                     .fixedSize(horizontal: true, vertical: false)
             }

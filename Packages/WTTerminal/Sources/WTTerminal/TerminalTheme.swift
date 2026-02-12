@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import SwiftTerm
 
 public struct ThemeColor: Sendable, Codable, Hashable {
@@ -28,6 +29,10 @@ public struct ThemeColor: Sendable, Codable, Hashable {
             blue: UInt16(b) * 257
         )
     }
+
+    public func toColor() -> SwiftUI.Color {
+        SwiftUI.Color(nsColor: toNSColor())
+    }
 }
 
 public struct TerminalTheme: Sendable, Codable, Hashable, Identifiable {
@@ -56,5 +61,11 @@ public struct TerminalTheme: Sendable, Codable, Hashable, Identifiable {
         self.cursor = cursor
         self.selection = selection
         self.ansiColors = ansiColors
+    }
+
+    /// Whether this theme is dark, based on background luminance.
+    public var isDark: Bool {
+        let luminance = 0.299 * Double(background.r) + 0.587 * Double(background.g) + 0.114 * Double(background.b)
+        return luminance < 128
     }
 }

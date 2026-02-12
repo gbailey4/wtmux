@@ -83,10 +83,15 @@ struct WorktreeDetailView: View {
 
                 // Diff overlay — shown when a file is selected from the outline
                 if let file = activeDiffFile {
-                    DiffContentView(file: file, onClose: { activeDiffFile = nil }) {
+                    DiffContentView(
+                        file: file,
+                        onClose: { activeDiffFile = nil },
+                        backgroundColor: currentTheme.background.toColor(),
+                        foregroundColor: currentTheme.foreground.toColor()
+                    ) {
                         openInEditorMenu(relativePath: file.displayPath)
                     }
-                    .background(.background)
+                    .environment(\.colorScheme, currentTheme.isDark ? .dark : .light)
                 }
             }
 
@@ -125,6 +130,24 @@ struct WorktreeDetailView: View {
             } else {
                 let ports = conflictingPorts.map(String.init).joined(separator: ", ")
                 Text("Worktree \"\(conflictingWorktreeName)\" is already using port\(conflictingPorts.count > 1 ? "s" : "") \(ports). Stop its runners and start here instead?")
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    if showRunnerPanel {
+                        showRunnerPanel = false
+                    } else {
+                        if configRunnerTabs.isEmpty {
+                            startRunners()
+                        }
+                        showRunnerPanel = true
+                    }
+                } label: {
+                    Image(systemName: "play.rectangle")
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .help("Toggle Runner Panel (Cmd+Shift+R)")
             }
         }
     }

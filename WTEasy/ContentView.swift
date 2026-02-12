@@ -42,23 +42,13 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                HStack(spacing: 4) {
-                    Button {
-                        showRunnerPanel.toggle()
-                    } label: {
-                        Image(systemName: "play.rectangle")
-                    }
-                    .keyboardShortcut("r", modifiers: [.command, .shift])
-                    .help("Toggle Runner Panel (Cmd+Shift+R)")
-
-                    Button {
-                        showRightPanel.toggle()
-                    } label: {
-                        Image(systemName: "sidebar.right")
-                    }
-                    .keyboardShortcut("d", modifiers: [.command, .shift])
-                    .help("Toggle Diff Panel (Cmd+Shift+D)")
+                Button {
+                    showRightPanel.toggle()
+                } label: {
+                    Image(systemName: "sidebar.right")
                 }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+                .help("Toggle Diff Panel (Cmd+Shift+D)")
             }
         }
         .sheet(isPresented: $showingAddProject) {
