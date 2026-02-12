@@ -18,13 +18,13 @@ struct ExternalEditor: Codable, Identifiable, Equatable {
         ExternalEditor(name: "Xcode", bundleId: "com.apple.dt.Xcode"),
     ]
 
-    static func installedEditors(custom: [ExternalEditor]) -> [ExternalEditor] {
+    static func installedEditors(custom: [ExternalEditor], hidden: Set<String> = hiddenEditorIds) -> [ExternalEditor] {
         var seen = Set<String>()
         var result: [ExternalEditor] = []
         for editor in builtIn + custom {
             guard !seen.contains(editor.bundleId) else { continue }
             seen.insert(editor.bundleId)
-            if editor.isInstalled {
+            if editor.isInstalled && !hidden.contains(editor.bundleId) {
                 result.append(editor)
             }
         }
@@ -37,7 +37,32 @@ struct ExternalEditor: Codable, Identifiable, Equatable {
         NSWorkspace.shared.open([fileURL], withApplicationAt: appURL, configuration: config)
     }
 
+    // MARK: - App Bundle
+
+    static func fromAppBundle(at url: URL) -> ExternalEditor? {
+        guard let bundle = Bundle(url: url),
+              let bundleId = bundle.bundleIdentifier else { return nil }
+        let name = bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+            ?? bundle.object(forInfoDictionaryKey: "CFBundleName") as? String
+            ?? url.deletingPathExtension().lastPathComponent
+        return ExternalEditor(name: name, bundleId: bundleId)
+    }
+
+    var icon: NSImage? {
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else { return nil }
+        return NSWorkspace.shared.icon(forFile: appURL.path)
+    }
+
     // MARK: - Persistence
+
+    static var hiddenEditorIds: Set<String> {
+        get {
+            Set(UserDefaults.standard.stringArray(forKey: "hiddenEditorIds") ?? [])
+        }
+        set {
+            UserDefaults.standard.set(Array(newValue), forKey: "hiddenEditorIds")
+        }
+    }
 
     static var customEditors: [ExternalEditor] {
         get {

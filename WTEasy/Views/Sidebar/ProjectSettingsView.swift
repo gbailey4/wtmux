@@ -53,16 +53,25 @@ struct ProjectSettingsView: View {
                 Section("Repository") {
                     TextField("Project Name", text: $name)
                         .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.leading)
 
-                    TextField("Repository Path", text: $repoPath)
-                        .textFieldStyle(.roundedBorder)
+                    HStack {
+                        TextField("Repository Path", text: $repoPath)
+                            .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.leading)
+                        Button("Browse...") {
+                            browseRepoPath()
+                        }
+                    }
 
                     TextField("Default Branch", text: $defaultBranch)
                         .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.leading)
 
                     HStack {
                         TextField("Worktree Base Path", text: $worktreeBasePath)
                             .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.leading)
                         Button("Browse...") {
                             browseWorktreeBasePath()
                         }
@@ -76,10 +85,13 @@ struct ProjectSettingsView: View {
                     if isRemote {
                         TextField("SSH Host", text: $sshHost)
                             .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.leading)
                         TextField("SSH User", text: $sshUser)
                             .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.leading)
                         TextField("SSH Port", text: $sshPort)
                             .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.leading)
                     }
                 }
 
@@ -88,6 +100,7 @@ struct ProjectSettingsView: View {
                         HStack {
                             TextField("File path", text: $envFilesToCopy[index])
                                 .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.leading)
                                 .font(.system(.body, design: .monospaced))
                             Button(role: .destructive) {
                                 envFilesToCopy.remove(at: index)
@@ -109,6 +122,7 @@ struct ProjectSettingsView: View {
                         HStack {
                             TextField("Command", text: $setupCommands[index])
                                 .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.leading)
                                 .font(.system(.body, design: .monospaced))
                             Button(role: .destructive) {
                                 setupCommands.remove(at: index)
@@ -128,6 +142,7 @@ struct ProjectSettingsView: View {
                 Section("Terminal") {
                     TextField("Start Command", text: $terminalStartCommand)
                         .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.leading)
                         .font(.system(.body, design: .monospaced))
                     Text("Runs automatically in every new terminal tab (e.g. `claude`)")
                         .font(.caption)
@@ -136,10 +151,11 @@ struct ProjectSettingsView: View {
 
                 Section("Run Configurations") {
                     ForEach(Array(runConfigurations.enumerated()), id: \.offset) { index, _ in
-                        VStack(alignment: .leading) {
+                        VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 TextField("Name", text: $runConfigurations[index].name)
                                     .textFieldStyle(.roundedBorder)
+                                    .multilineTextAlignment(.leading)
                                 Button(role: .destructive) {
                                     runConfigurations.remove(at: index)
                                 } label: {
@@ -149,14 +165,17 @@ struct ProjectSettingsView: View {
                             }
                             TextField("Command", text: $runConfigurations[index].command)
                                 .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.leading)
                                 .font(.system(.body, design: .monospaced))
                             HStack {
                                 TextField("Port", text: $runConfigurations[index].portString)
                                     .textFieldStyle(.roundedBorder)
+                                    .multilineTextAlignment(.leading)
                                     .frame(width: 80)
                                 Toggle("Auto-start", isOn: $runConfigurations[index].autoStart)
                             }
                         }
+                        .labelsHidden()
                         .padding(.vertical, 4)
                     }
                     Button {
@@ -201,6 +220,21 @@ struct ProjectSettingsView: View {
                     )
                 }
             }
+        }
+    }
+
+    private func browseRepoPath() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Select the git repository root"
+        if !repoPath.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: repoPath).deletingLastPathComponent()
+        }
+
+        if panel.runModal() == .OK, let url = panel.url {
+            repoPath = url.path
         }
     }
 

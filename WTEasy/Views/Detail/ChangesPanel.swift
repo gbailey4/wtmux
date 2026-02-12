@@ -34,6 +34,7 @@ enum ChangeGroup: Identifiable {
 struct ChangesPanel: View {
     let worktree: Worktree
     @Binding var activeDiffFile: DiffFile?
+    @Binding var changedFileCount: Int
 
     @State private var changeGroups: [ChangeGroup] = []
     @State private var diffCache: [String: [DiffFile]] = [:]
@@ -221,6 +222,7 @@ struct ChangesPanel: View {
 
     private func loadAllChanges() async {
         isLoading = true
+        changedFileCount = 0
         defer { isLoading = false }
 
         var groups: [ChangeGroup] = []
@@ -246,6 +248,11 @@ struct ChangesPanel: View {
         }
 
         changeGroups = groups
+
+        // Update badge count: number of working-changes files
+        let workingCount = groups
+            .first(where: { $0.id == "working-changes" })?.files.count ?? 0
+        changedFileCount = workingCount
 
         if groups.isEmpty {
             expandedGroups = []

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import WTTerminal
 
 struct SettingsView: View {
@@ -7,12 +8,23 @@ struct SettingsView: View {
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
 
     @State private var customEditors = ExternalEditor.customEditors
+    @State private var hiddenEditorIds = ExternalEditor.hiddenEditorIds
+
+    private var allEditors: [ExternalEditor] {
+        ExternalEditor.installedEditors(custom: customEditors, hidden: hiddenEditorIds)
+    }
 
     var body: some View {
         Form {
             Section("Terminal") {
-                TextField("Default Shell", text: $defaultShell)
-                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    TextField("Default Shell", text: $defaultShell)
+                        .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.leading)
+                    Button("Browse...") {
+                        browseShell()
+                    }
+                }
 
                 HStack {
                     Text("Font Size")
@@ -33,31 +45,74 @@ struct SettingsView: View {
             }
 
             Section("Editors") {
-                ForEach($customEditors) { $editor in
-                    HStack {
-                        TextField("Name", text: $editor.name)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(maxWidth: 150)
-                        TextField("Bundle ID", text: $editor.bundleId)
-                            .textFieldStyle(.roundedBorder)
+                ForEach(allEditors) { editor in
+                    HStack(spacing: 10) {
+                        if let icon = editor.icon {
+                            Image(nsImage: icon)
+                                .resizable()
+                                .frame(width: 24, height: 24)
+                        } else {
+                            Image(systemName: "app.dashed")
+                                .frame(width: 24, height: 24)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(editor.name)
+                            Text(editor.bundleId)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            removeEditor(editor)
+                        } label: {
+                            Image(systemName: "minus.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
-                .onDelete { offsets in
-                    customEditors.remove(atOffsets: offsets)
-                    ExternalEditor.customEditors = customEditors
-                }
 
-                Button("Add Editor") {
-                    customEditors.append(ExternalEditor(name: "", bundleId: ""))
+                Button("Add Editor...") {
+                    let panel = NSOpenPanel()
+                    panel.allowedContentTypes = [.application]
+                    panel.directoryURL = URL(fileURLWithPath: "/Applications")
+                    panel.allowsMultipleSelection = false
+                    if panel.runModal() == .OK, let url = panel.url,
+                       let editor = ExternalEditor.fromAppBundle(at: url) {
+                        guard !customEditors.contains(where: { $0.bundleId == editor.bundleId }) else { return }
+                        customEditors.append(editor)
+                        ExternalEditor.customEditors = customEditors
+                    }
                 }
-            }
-            .onChange(of: customEditors) {
-                ExternalEditor.customEditors = customEditors
             }
         }
         .formStyle(.grouped)
         .frame(width: 450)
         .navigationTitle("Settings")
+    }
+
+    private func browseShell() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Select a shell executable"
+        let currentShellURL = URL(fileURLWithPath: defaultShell)
+        panel.directoryURL = currentShellURL.deletingLastPathComponent()
+
+        if panel.runModal() == .OK, let url = panel.url {
+            defaultShell = url.path
+        }
+    }
+
+    private func removeEditor(_ editor: ExternalEditor) {
+        if let index = customEditors.firstIndex(where: { $0.bundleId == editor.bundleId }) {
+            customEditors.remove(at: index)
+            ExternalEditor.customEditors = customEditors
+        } else {
+            hiddenEditorIds.insert(editor.bundleId)
+            ExternalEditor.hiddenEditorIds = hiddenEditorIds
+        }
     }
 }
 

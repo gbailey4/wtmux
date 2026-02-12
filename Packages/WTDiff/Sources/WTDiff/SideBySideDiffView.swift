@@ -46,7 +46,7 @@ public struct DiffContentView<HeaderAccessory: View>: View {
                             }
                         }
                     }
-                    .frame(minWidth: 600, minHeight: proxy.size.height, alignment: .top)
+                    .frame(minWidth: proxy.size.width, minHeight: proxy.size.height, alignment: .topLeading)
                 }
                 .font(.system(size: 12, weight: .regular, design: .monospaced))
             }
@@ -59,6 +59,14 @@ public struct DiffContentView<HeaderAccessory: View>: View {
 
     // MARK: - Header
 
+    private var additions: Int {
+        file.hunks.flatMap(\.lines).filter { $0.kind == .addition }.count
+    }
+
+    private var deletions: Int {
+        file.hunks.flatMap(\.lines).filter { $0.kind == .deletion }.count
+    }
+
     @ViewBuilder
     private var headerBar: some View {
         HStack {
@@ -67,6 +75,17 @@ public struct DiffContentView<HeaderAccessory: View>: View {
                 .lineLimit(1)
                 .truncationMode(.head)
             Spacer()
+            HStack(spacing: 2) {
+                if additions > 0 {
+                    Text("+\(additions)")
+                        .foregroundStyle(.green)
+                }
+                if deletions > 0 {
+                    Text("-\(deletions)")
+                        .foregroundStyle(.red)
+                }
+            }
+            .font(.system(.caption, design: .monospaced))
             headerAccessory()
             Button { onClose() } label: {
                 Image(systemName: "xmark")
@@ -82,7 +101,7 @@ public struct DiffContentView<HeaderAccessory: View>: View {
 
     @ViewBuilder
     private func hunkHeader(_ hunk: DiffHunk) -> some View {
-        Text(hunk.header)
+        Text(readableHunkRange(hunk))
             .font(.system(size: 11, weight: .regular, design: .monospaced))
             .foregroundStyle(.secondary)
             .padding(.leading, 82)
@@ -90,6 +109,14 @@ public struct DiffContentView<HeaderAccessory: View>: View {
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.blue.opacity(0.08))
+    }
+
+    private func readableHunkRange(_ hunk: DiffHunk) -> String {
+        if hunk.newCount <= 1 {
+            return "Line \(hunk.newStart)"
+        } else {
+            return "Lines \(hunk.newStart)–\(hunk.newStart + hunk.newCount - 1)"
+        }
     }
 
     // MARK: - Diff Line

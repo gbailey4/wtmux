@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var showingAddProject = false
     @State private var showRightPanel = false
     @State private var showRunnerPanel = false
+    @State private var changedFileCount: Int = 0
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var terminalSessionManager = TerminalSessionManager()
 
@@ -30,7 +31,8 @@ struct ContentView: View {
                     worktree: worktree,
                     terminalSessionManager: terminalSessionManager,
                     showRightPanel: $showRightPanel,
-                    showRunnerPanel: $showRunnerPanel
+                    showRunnerPanel: $showRunnerPanel,
+                    changedFileCount: $changedFileCount
                 )
             } else {
                 ContentUnavailableView(
@@ -46,6 +48,17 @@ struct ContentView: View {
                     showRightPanel.toggle()
                 } label: {
                     Image(systemName: "sidebar.right")
+                        .overlay(alignment: .topTrailing) {
+                            if changedFileCount > 0 {
+                                Text("\(changedFileCount)")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(Color.accentColor, in: Capsule())
+                                    .offset(x: 8, y: -8)
+                            }
+                        }
                 }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
                 .help("Toggle Diff Panel (Cmd+Shift+D)")

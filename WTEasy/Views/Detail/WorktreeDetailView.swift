@@ -1,13 +1,16 @@
 import SwiftUI
 import WTCore
 import WTDiff
+import WTGit
 import WTTerminal
+import WTTransport
 
 struct WorktreeDetailView: View {
     let worktree: Worktree
     let terminalSessionManager: TerminalSessionManager
     @Binding var showRightPanel: Bool
     @Binding var showRunnerPanel: Bool
+    @Binding var changedFileCount: Int
 
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
 
@@ -98,13 +101,18 @@ struct WorktreeDetailView: View {
             // Right panel: Changes outline
             if showRightPanel {
                 Divider()
-                ChangesPanel(worktree: worktree, activeDiffFile: $activeDiffFile)
+                ChangesPanel(worktree: worktree, activeDiffFile: $activeDiffFile, changedFileCount: $changedFileCount)
                     .frame(width: 400)
             }
         }
         .task(id: worktreeId) {
             activeDiffFile = nil
+            changedFileCount = 0
             await ensureFirstTab()
+            let git = GitService(transport: LocalTransport(), repoPath: worktree.path)
+            if let files = try? await git.status() {
+                changedFileCount = files.count
+            }
         }
         .alert("Close Terminal?", isPresented: $showCloseTabAlert) {
             Button("Close", role: .destructive) {
@@ -200,21 +208,23 @@ struct WorktreeDetailView: View {
     @ViewBuilder
     private func openInEditorMenu(relativePath: String) -> some View {
         let editors = ExternalEditor.installedEditors(custom: ExternalEditor.customEditors)
-        if !editors.isEmpty {
-            Menu {
-                ForEach(editors) { editor in
-                    Button(editor.name) {
-                        let fileURL = URL(fileURLWithPath: worktree.path)
-                            .appendingPathComponent(relativePath)
-                        ExternalEditor.open(fileURL: fileURL, editor: editor)
-                    }
+        Menu {
+            ForEach(editors) { editor in
+                Button(editor.name) {
+                    let fileURL = URL(fileURLWithPath: worktree.path)
+                        .appendingPathComponent(relativePath)
+                    ExternalEditor.open(fileURL: fileURL, editor: editor)
                 }
-            } label: {
-                Image(systemName: "arrow.up.forward.square")
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
+            Divider()
+            SettingsLink {
+                Text("Configure Editors...")
+            }
+        } label: {
+            Image(systemName: "arrow.up.forward.square")
         }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 
     // MARK: - Run Actions
