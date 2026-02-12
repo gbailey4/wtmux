@@ -3,9 +3,11 @@ import WebKit
 
 public struct TerminalRepresentable: NSViewRepresentable {
     let session: TerminalSession
+    var isActive: Bool
 
-    public init(session: TerminalSession) {
+    public init(session: TerminalSession, isActive: Bool = true) {
         self.session = session
+        self.isActive = isActive
     }
 
     public func makeCoordinator() -> Coordinator {
@@ -40,12 +42,25 @@ public struct TerminalRepresentable: NSViewRepresentable {
     }
 
     public func updateNSView(_ nsView: WKWebView, context: Context) {
-        // Terminal persists — no updates needed on re-render
+        let wasActive = context.coordinator.isActive
+        context.coordinator.isActive = isActive
+        if isActive && !wasActive && context.coordinator.isReady {
+            Self.focusWebView(nsView)
+        }
+    }
+
+    static func focusWebView(_ webView: WKWebView) {
+        DispatchQueue.main.async {
+            webView.window?.makeFirstResponder(webView)
+            webView.evaluateJavaScript("window.terminalFocus()")
+        }
     }
 
     public final class Coordinator: NSObject, WKScriptMessageHandler, @unchecked Sendable {
         let session: TerminalSession
         weak var webView: WKWebView?
+        var isActive: Bool = false
+        var isReady: Bool = false
 
         init(session: TerminalSession) {
             self.session = session
@@ -74,6 +89,31 @@ public struct TerminalRepresentable: NSViewRepresentable {
                 return
             }
 
+            if let existingPty = session.ptyProcess {
+                // Reconnect: PTY is still running from a previous WKWebView.
+                // Update onOutput to write to the new webView.
+                existingPty.onOutput = { [weak self] data in
+                    guard let self else { return }
+                    let base64 = data.base64EncodedString()
+                    DispatchQueue.main.async { [weak self] in
+                        self?.webView?.evaluateJavaScript("window.terminalWrite('\(base64)')")
+                    }
+                }
+                // Force SIGWINCH by changing size then restoring — ioctl only
+                // sends the signal when dimensions actually change. This makes
+                // the shell redraw its prompt in the fresh xterm.js instance.
+                let cols = UInt16(dims.cols)
+                let rows = UInt16(dims.rows)
+                existingPty.resize(cols: cols, rows: rows > 1 ? rows - 1 : rows + 1)
+                existingPty.resize(cols: cols, rows: rows)
+
+                isReady = true
+                if isActive, let webView {
+                    TerminalRepresentable.focusWebView(webView)
+                }
+                return
+            }
+
             let pty = PTYProcess()
             session.ptyProcess = pty
 
@@ -97,6 +137,11 @@ public struct TerminalRepresentable: NSViewRepresentable {
                 cols: UInt16(dims.cols),
                 rows: UInt16(dims.rows)
             )
+
+            isReady = true
+            if isActive, let webView {
+                TerminalRepresentable.focusWebView(webView)
+            }
         }
 
         private func handleInput(_ body: Any) {

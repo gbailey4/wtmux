@@ -15,12 +15,28 @@ struct WorktreeDetailView: View {
     @State private var diffFiles: [DiffFile] = []
     @State private var selectedDiffFile: DiffFile?
 
+    private var worktreeId: String { worktree.branchName }
+
+    private var terminalTabs: [TerminalSession] {
+        terminalSessionManager.sessions(forWorktree: worktreeId)
+    }
+
+    private var activeTabId: String? {
+        terminalSessionManager.activeSessionId[worktreeId]
+    }
+
+    private var allTabSessions: [TerminalSession] {
+        terminalSessionManager.sessions.values
+            .filter { !$0.worktreeId.isEmpty }
+            .sorted { $0.id < $1.id }
+    }
+
     var body: some View {
         HStack(spacing: 0) {
-            // Center: Main terminal + runner terminals
+            // Center: Main terminal tabs + runner terminals
             VStack(spacing: 0) {
-                // Main Claude Code terminal
-                mainTerminalView
+                // Main terminal with tabs
+                tabbedTerminalView
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 // Bottom: Runner terminal tabs
@@ -39,7 +55,8 @@ struct WorktreeDetailView: View {
                     .frame(width: 400)
             }
         }
-        .task(id: worktree.branchName) {
+        .task(id: worktreeId) {
+            ensureFirstTab()
             if showRightPanel {
                 await loadDiff()
             }
@@ -51,15 +68,90 @@ struct WorktreeDetailView: View {
         }
     }
 
-    @ViewBuilder
-    private var mainTerminalView: some View {
-        let session = terminalSessionManager.createSession(
-            id: "cc-\(worktree.branchName)",
-            title: "Claude Code - \(worktree.branchName)",
-            workingDirectory: worktree.path
-        )
-        TerminalRepresentable(session: session)
+    private func ensureFirstTab() {
+        if terminalSessionManager.sessions(forWorktree: worktreeId).isEmpty {
+            _ = terminalSessionManager.createTab(
+                forWorktree: worktreeId,
+                workingDirectory: worktree.path
+            )
+        }
     }
+
+    // MARK: - Tabbed Terminal
+
+    @ViewBuilder
+    private var tabbedTerminalView: some View {
+        VStack(spacing: 0) {
+            terminalTabBar
+            ZStack {
+                // All tab sessions across ALL worktrees live here so
+                // WKWebViews (and their PTY output streams) survive
+                // worktree switches.  Only the active tab is visible.
+                ForEach(allTabSessions) { session in
+                    let active = session.id == activeTabId
+                    TerminalRepresentable(session: session, isActive: active)
+                        .opacity(active ? 1 : 0)
+                        .allowsHitTesting(active)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var terminalTabBar: some View {
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    ForEach(terminalTabs) { session in
+                        terminalTab(session: session)
+                    }
+                }
+            }
+
+            Spacer()
+
+            Button {
+                _ = terminalSessionManager.createTab(
+                    forWorktree: worktreeId,
+                    workingDirectory: worktree.path
+                )
+            } label: {
+                Image(systemName: "plus")
+                    .font(.caption)
+                    .padding(6)
+            }
+            .buttonStyle(.plain)
+        }
+        .background(.bar)
+    }
+
+    @ViewBuilder
+    private func terminalTab(session: TerminalSession) -> some View {
+        HStack(spacing: 4) {
+            Button {
+                terminalSessionManager.setActiveSession(worktreeId: worktreeId, sessionId: session.id)
+            } label: {
+                Text(session.title)
+                    .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+
+            if terminalTabs.count > 1 {
+                Button {
+                    terminalSessionManager.removeTab(sessionId: session.id)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(session.id == activeTabId ? Color.accentColor.opacity(0.2) : Color.clear)
+    }
+
+    // MARK: - Runner Terminals
 
     @ViewBuilder
     private var runnerTerminalsView: some View {
@@ -91,6 +183,8 @@ struct WorktreeDetailView: View {
             }
         }
     }
+
+    // MARK: - Diff Panel
 
     @ViewBuilder
     private var diffPanelView: some View {
