@@ -8,10 +8,13 @@ let package = Package(
     products: [
         .library(name: "WTTerminal", targets: ["WTTerminal"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.10.0"),
+    ],
     targets: [
         .target(
             name: "WTTerminal",
-            resources: [.copy("Resources")]
+            dependencies: ["SwiftTerm"]
         ),
         .testTarget(name: "WTTerminalTests", dependencies: ["WTTerminal"]),
     ]

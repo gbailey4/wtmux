@@ -1,5 +1,6 @@
+import Foundation
 import SwiftUI
-import WebKit
+import SwiftTerm
 
 public struct TerminalRepresentable: NSViewRepresentable {
     let session: TerminalSession
@@ -10,160 +11,164 @@ public struct TerminalRepresentable: NSViewRepresentable {
         self.isActive = isActive
     }
 
-    public func makeCoordinator() -> Coordinator {
-        Coordinator(session: session)
+    public func makeNSView(context: Context) -> DeferredStartTerminalView {
+        if let existing = session.terminalView {
+            return existing
+        }
+
+        let view = DeferredStartTerminalView(
+            workingDirectory: session.workingDirectory,
+            shellPath: session.shellPath
+        )
+        let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        view.font = font
+        session.terminalView = view
+        return view
     }
 
-    public func makeNSView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        let userContent = config.userContentController
-        let coordinator = context.coordinator
-
-        userContent.add(coordinator, name: "terminalReady")
-        userContent.add(coordinator, name: "terminalInput")
-        userContent.add(coordinator, name: "terminalResize")
-        config.preferences.setValue(true, forKey: "developerExtrasEnabled")
-
-        let webView = WKWebView(frame: .zero, configuration: config)
-        webView.setValue(false, forKey: "drawsBackground")
-        coordinator.webView = webView
-
-        guard let htmlURL = Bundle.module.url(
-            forResource: "terminal",
-            withExtension: "html",
-            subdirectory: "Resources"
-        ) else {
-            return webView
-        }
-
-        let resourceDir = htmlURL.deletingLastPathComponent()
-        webView.loadFileURL(htmlURL, allowingReadAccessTo: resourceDir)
-        return webView
-    }
-
-    public func updateNSView(_ nsView: WKWebView, context: Context) {
-        let wasActive = context.coordinator.isActive
-        context.coordinator.isActive = isActive
-        if isActive && !wasActive && context.coordinator.isReady {
-            Self.focusWebView(nsView)
-        }
-    }
-
-    static func focusWebView(_ webView: WKWebView) {
-        DispatchQueue.main.async {
-            webView.window?.makeFirstResponder(webView)
-            webView.evaluateJavaScript("window.terminalFocus()")
-        }
-    }
-
-    public final class Coordinator: NSObject, WKScriptMessageHandler, @unchecked Sendable {
-        let session: TerminalSession
-        weak var webView: WKWebView?
-        var isActive: Bool = false
-        var isReady: Bool = false
-
-        init(session: TerminalSession) {
-            self.session = session
-        }
-
-        public func userContentController(
-            _ userContentController: WKUserContentController,
-            didReceive message: WKScriptMessage
-        ) {
-            switch message.name {
-            case "terminalReady":
-                handleReady(message.body)
-            case "terminalInput":
-                handleInput(message.body)
-            case "terminalResize":
-                handleResize(message.body)
-            default:
-                break
+    public func updateNSView(_ nsView: DeferredStartTerminalView, context: Context) {
+        if isActive {
+            DispatchQueue.main.async {
+                nsView.window?.makeFirstResponder(nsView)
             }
-        }
-
-        private func handleReady(_ body: Any) {
-            guard let json = body as? String,
-                  let data = json.data(using: .utf8),
-                  let dims = try? JSONDecoder().decode(TerminalDimensions.self, from: data) else {
-                return
-            }
-
-            if let existingPty = session.ptyProcess {
-                // Reconnect: PTY is still running from a previous WKWebView.
-                // Update onOutput to write to the new webView.
-                existingPty.onOutput = { [weak self] data in
-                    guard let self else { return }
-                    let base64 = data.base64EncodedString()
-                    DispatchQueue.main.async { [weak self] in
-                        self?.webView?.evaluateJavaScript("window.terminalWrite('\(base64)')")
-                    }
-                }
-                // Force SIGWINCH by changing size then restoring — ioctl only
-                // sends the signal when dimensions actually change. This makes
-                // the shell redraw its prompt in the fresh xterm.js instance.
-                let cols = UInt16(dims.cols)
-                let rows = UInt16(dims.rows)
-                existingPty.resize(cols: cols, rows: rows > 1 ? rows - 1 : rows + 1)
-                existingPty.resize(cols: cols, rows: rows)
-
-                isReady = true
-                if isActive, let webView {
-                    TerminalRepresentable.focusWebView(webView)
-                }
-                return
-            }
-
-            let pty = PTYProcess()
-            session.ptyProcess = pty
-
-            pty.onOutput = { [weak self] data in
-                guard let self else { return }
-                let base64 = data.base64EncodedString()
-                DispatchQueue.main.async { [weak self] in
-                    self?.webView?.evaluateJavaScript("window.terminalWrite('\(base64)')")
-                }
-            }
-
-            var env = ProcessInfo.processInfo.environment
-            env["TERM"] = "xterm-256color"
-            env["COLORTERM"] = "truecolor"
-            let envStrings = env.map { "\($0.key)=\($0.value)" }
-
-            pty.start(
-                executable: session.shellPath,
-                environment: envStrings,
-                currentDirectory: session.workingDirectory,
-                cols: UInt16(dims.cols),
-                rows: UInt16(dims.rows)
-            )
-
-            isReady = true
-            if isActive, let webView {
-                TerminalRepresentable.focusWebView(webView)
-            }
-        }
-
-        private func handleInput(_ body: Any) {
-            guard let base64 = body as? String,
-                  let data = Data(base64Encoded: base64) else {
-                return
-            }
-            session.ptyProcess?.write(data)
-        }
-
-        private func handleResize(_ body: Any) {
-            guard let json = body as? String,
-                  let data = json.data(using: .utf8),
-                  let dims = try? JSONDecoder().decode(TerminalDimensions.self, from: data) else {
-                return
-            }
-            session.ptyProcess?.resize(cols: UInt16(dims.cols), rows: UInt16(dims.rows))
         }
     }
 }
 
-private struct TerminalDimensions: Decodable {
-    let cols: Int
-    let rows: Int
+public class DeferredStartTerminalView: LocalProcessTerminalView {
+    private var processStarted = false
+    private let workingDirectory: String
+    private let shellPath: String
+    private var resizeTimer: Timer?
+
+    public init(workingDirectory: String, shellPath: String) {
+        self.workingDirectory = workingDirectory
+        self.shellPath = shellPath
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required public init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    public override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+
+        guard !processStarted, newSize.width > 0, newSize.height > 0 else { return }
+
+        resizeTimer?.invalidate()
+        resizeTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.startProcessIfNeeded()
+            }
+        }
+    }
+
+    // Force a full repaint when switching between normal/alt screen buffers
+    // so TUI apps restore cleanly on exit.
+    open override func bufferActivated(source: Terminal) {
+        super.bufferActivated(source: source)
+        setNeedsDisplay(bounds)
+    }
+
+    // MARK: - Kitty keyboard protocol filter
+
+    /// Strips Kitty keyboard protocol sequences that SwiftTerm misinterprets.
+    ///
+    /// Claude Code sends CSI with private parameter prefixes (`<`, `>`, `?`) and
+    /// final byte `u` for push/pop/query keyboard mode. SwiftTerm's CSI parser
+    /// ignores the prefix and dispatches `u` as cursor restore, jumping the cursor
+    /// to saved position (0,0).
+    ///
+    /// Pattern: `ESC [ [<>?] [0-9;]* u`
+    open override func dataReceived(slice: ArraySlice<UInt8>) {
+        let filtered = Self.filterKittyKeyboardSequences(slice)
+        if filtered.count == slice.count {
+            super.dataReceived(slice: slice)
+        } else {
+            filtered.withUnsafeBufferPointer { buffer in
+                let arraySlice = Array(buffer)[...]
+                super.dataReceived(slice: arraySlice)
+            }
+        }
+    }
+
+    static func filterKittyKeyboardSequences(_ input: ArraySlice<UInt8>) -> [UInt8] {
+        var output = [UInt8]()
+        output.reserveCapacity(input.count)
+
+        var i = input.startIndex
+        let end = input.endIndex
+
+        while i < end {
+            // Look for ESC (0x1b)
+            guard input[i] == 0x1b else {
+                output.append(input[i])
+                i += 1
+                continue
+            }
+
+            // Need at least ESC [ <prefix> u = 4 bytes
+            let remaining = end - i
+            guard remaining >= 4, input[i + 1] == 0x5b else { // 0x5b = '['
+                output.append(input[i])
+                i += 1
+                continue
+            }
+
+            let prefix = input[i + 2]
+            // Check for private parameter prefix: < (0x3c), > (0x3e), ? (0x3f)
+            guard prefix == 0x3c || prefix == 0x3e || prefix == 0x3f else {
+                output.append(input[i])
+                i += 1
+                continue
+            }
+
+            // Scan past parameter bytes: digits (0x30-0x39) and semicolons (0x3b)
+            var j = i + 3
+            while j < end && ((input[j] >= 0x30 && input[j] <= 0x39) || input[j] == 0x3b) {
+                j += 1
+            }
+
+            // Check for final byte 'u' (0x75)
+            if j < end && input[j] == 0x75 {
+                // Skip the entire Kitty keyboard sequence
+                i = j + 1
+            } else {
+                // Not a Kitty sequence — emit the ESC and continue
+                output.append(input[i])
+                i += 1
+            }
+        }
+
+        return output
+    }
+
+    // MARK: - Process lifecycle
+
+    private func startProcessIfNeeded() {
+        guard !processStarted else { return }
+        processStarted = true
+
+        var env = ProcessInfo.processInfo.environment
+        env["TERM"] = "xterm-256color"
+        env["COLORTERM"] = "truecolor"
+        let envStrings = env.map { "\($0.key)=\($0.value)" }
+
+        startProcess(
+            executable: shellPath,
+            args: [],
+            environment: envStrings,
+            execName: "-" + (shellPath as NSString).lastPathComponent,
+            currentDirectory: workingDirectory
+        )
+
+        // Delayed SIGWINCH to force shell to redraw at correct dimensions
+        if let pid = process?.shellPid, pid > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                kill(pid, SIGWINCH)
+            }
+        }
+    }
 }

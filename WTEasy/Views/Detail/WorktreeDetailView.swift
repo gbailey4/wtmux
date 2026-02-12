@@ -85,7 +85,7 @@ struct WorktreeDetailView: View {
             terminalTabBar
             ZStack {
                 // All tab sessions across ALL worktrees live here so
-                // WKWebViews (and their PTY output streams) survive
+                // terminal views (and their PTY processes) survive
                 // worktree switches.  Only the active tab is visible.
                 ForEach(allTabSessions) { session in
                     let active = session.id == activeTabId

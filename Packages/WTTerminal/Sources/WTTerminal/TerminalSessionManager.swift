@@ -1,6 +1,6 @@
 import Foundation
 
-@Observable
+@MainActor @Observable
 public final class TerminalSessionManager: @unchecked Sendable {
     public private(set) var sessions: [String: TerminalSession] = [:]
     public private(set) var activeSessionId: [String: String] = [:]
@@ -63,7 +63,8 @@ public final class TerminalSessionManager: @unchecked Sendable {
         let worktreeId = session.worktreeId
         let wasActive = activeSessionId[worktreeId] == sessionId
 
-        session.ptyProcess?.stop()
+        session.terminalView?.terminate()
+        session.terminalView = nil
         sessions.removeValue(forKey: sessionId)
 
         if wasActive {
@@ -73,13 +74,15 @@ public final class TerminalSessionManager: @unchecked Sendable {
     }
 
     public func removeSession(id: String) {
-        sessions[id]?.ptyProcess?.stop()
+        sessions[id]?.terminalView?.terminate()
+        sessions[id]?.terminalView = nil
         sessions.removeValue(forKey: id)
     }
 
     public func removeAll() {
         for session in sessions.values {
-            session.ptyProcess?.stop()
+            session.terminalView?.terminate()
+            session.terminalView = nil
         }
         sessions.removeAll()
         activeSessionId.removeAll()
