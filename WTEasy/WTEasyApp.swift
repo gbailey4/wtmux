@@ -28,5 +28,9 @@ struct WTEasyApp: App {
         .modelContainer(modelContainer)
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified(showsTitle: true))
+
+        Settings {
+            SettingsView()
+        }
     }
 }

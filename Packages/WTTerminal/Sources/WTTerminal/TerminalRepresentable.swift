@@ -5,10 +5,12 @@ import SwiftTerm
 public struct TerminalRepresentable: NSViewRepresentable {
     let session: TerminalSession
     var isActive: Bool
+    var theme: TerminalTheme
 
-    public init(session: TerminalSession, isActive: Bool = true) {
+    public init(session: TerminalSession, isActive: Bool = true, theme: TerminalTheme = TerminalThemes.defaultTheme) {
         self.session = session
         self.isActive = isActive
+        self.theme = theme
     }
 
     public func makeNSView(context: Context) -> DeferredStartTerminalView {
@@ -30,16 +32,26 @@ public struct TerminalRepresentable: NSViewRepresentable {
         }
         let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         view.font = font
+        applyTheme(theme, to: view)
         session.terminalView = view
         return view
     }
 
     public func updateNSView(_ nsView: DeferredStartTerminalView, context: Context) {
+        applyTheme(theme, to: nsView)
         if isActive {
             DispatchQueue.main.async {
                 nsView.window?.makeFirstResponder(nsView)
             }
         }
+    }
+
+    private func applyTheme(_ theme: TerminalTheme, to view: DeferredStartTerminalView) {
+        view.nativeBackgroundColor = theme.background.toNSColor()
+        view.nativeForegroundColor = theme.foreground.toNSColor()
+        view.caretColor = theme.cursor.toNSColor()
+        view.selectedTextBackgroundColor = theme.selection.toNSColor()
+        view.installColors(theme.ansiColors.map { $0.toSwiftTermColor() })
     }
 }
 

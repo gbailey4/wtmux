@@ -91,6 +91,138 @@ public actor GitService {
         return result.stdout
     }
 
+    /// Returns the list of changed files in the working directory (staged + unstaged + untracked).
+    public func status() async throws -> [GitFileStatus] {
+        let result = try await transport.execute(
+            ["/usr/bin/git", "status", "--porcelain=v1"],
+            in: repoPath
+        )
+        guard result.succeeded else {
+            throw GitError.commandFailed(result.stderr)
+        }
+        return parseStatus(result.stdout)
+    }
+
+    /// Returns a unified diff of all working changes (staged + unstaged) against HEAD.
+    public func workingDiff() async throws -> String {
+        let result = try await transport.execute(
+            ["/usr/bin/git", "diff", "HEAD"],
+            in: repoPath
+        )
+        guard result.succeeded else {
+            throw GitError.commandFailed(result.stderr)
+        }
+        return result.stdout
+    }
+
+    /// Returns commits on the current branch since it diverged from `baseBranch`, newest-first.
+    public func log(since baseBranch: String) async throws -> [GitCommitInfo] {
+        let result = try await transport.execute(
+            ["/usr/bin/git", "log", "\(baseBranch)..HEAD", "--format=%H%n%h%n%an%n%aI%n%s"],
+            in: repoPath
+        )
+        guard result.succeeded else {
+            throw GitError.commandFailed(result.stderr)
+        }
+        return parseLog(result.stdout)
+    }
+
+    /// Returns the diff for a single commit (patch only, no commit header).
+    public func commitDiff(hash: String) async throws -> String {
+        let result = try await transport.execute(
+            ["/usr/bin/git", "show", hash, "--format="],
+            in: repoPath
+        )
+        guard result.succeeded else {
+            throw GitError.commandFailed(result.stderr)
+        }
+        return result.stdout
+    }
+
+    /// Returns the list of files changed in a single commit.
+    public func commitFiles(hash: String) async throws -> [GitFileStatus] {
+        let result = try await transport.execute(
+            ["/usr/bin/git", "diff-tree", "--no-commit-id", "-r", "--name-status", hash],
+            in: repoPath
+        )
+        guard result.succeeded else {
+            throw GitError.commandFailed(result.stderr)
+        }
+        return parseDiffTree(result.stdout)
+    }
+
+    // MARK: - Parsers
+
+    private func parseStatus(_ output: String) -> [GitFileStatus] {
+        guard !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        var files: [GitFileStatus] = []
+        for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
+            guard line.count >= 4 else { continue }
+            let index = line.index(line.startIndex, offsetBy: 0)
+            let worktreeChar = line[line.index(line.startIndex, offsetBy: 1)]
+            let indexChar = line[index]
+            let path = String(line.dropFirst(3))
+
+            // Determine effective status: prefer index status, fall back to worktree status
+            let statusChar: Character
+            if indexChar == "?" {
+                statusChar = "?"
+            } else if indexChar != " " {
+                statusChar = indexChar
+            } else {
+                statusChar = worktreeChar
+            }
+
+            let kind = FileStatusKind(rawValue: String(statusChar)) ?? .modified
+            files.append(GitFileStatus(path: path, status: kind))
+        }
+        return files
+    }
+
+    private func parseLog(_ output: String) -> [GitCommitInfo] {
+        guard !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        let lines = output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var commits: [GitCommitInfo] = []
+        var i = 0
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+
+        while i + 4 < lines.count {
+            let hash = lines[i]
+            let shortHash = lines[i + 1]
+            let author = lines[i + 2]
+            let dateStr = lines[i + 3]
+            let message = lines[i + 4]
+            let date = formatter.date(from: dateStr) ?? Date()
+
+            commits.append(GitCommitInfo(
+                id: hash,
+                shortHash: shortHash,
+                author: author,
+                date: date,
+                message: message
+            ))
+            i += 5
+        }
+        return commits
+    }
+
+    private func parseDiffTree(_ output: String) -> [GitFileStatus] {
+        guard !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        var files: [GitFileStatus] = []
+        for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
+            let parts = line.split(separator: "\t", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            let statusStr = String(parts[0]).trimmingCharacters(in: .whitespaces)
+            let path = String(parts[1])
+            // Handle rename/copy status codes like R100, C080
+            let kindChar = statusStr.prefix(1)
+            let kind = FileStatusKind(rawValue: String(kindChar)) ?? .modified
+            files.append(GitFileStatus(path: path, status: kind))
+        }
+        return files
+    }
+
     private func parseWorktreeList(_ output: String) -> [GitWorktreeInfo] {
         var worktrees: [GitWorktreeInfo] = []
         var currentPath: String?

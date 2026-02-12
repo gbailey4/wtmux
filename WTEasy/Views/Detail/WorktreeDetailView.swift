@@ -8,9 +8,15 @@ struct WorktreeDetailView: View {
     @Binding var showRightPanel: Bool
     @Binding var showRunnerPanel: Bool
 
+    @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
+
     @State private var showRunnerConflictAlert = false
     @State private var conflictingWorktreeName: String = ""
     @State private var conflictingPorts: [Int] = []
+
+    private var currentTheme: TerminalTheme {
+        TerminalThemes.theme(forId: terminalThemeId)
+    }
 
     private var worktreeId: String { worktree.branchName }
 
@@ -231,7 +237,7 @@ struct WorktreeDetailView: View {
                 // worktree switches.  Only the active tab is visible.
                 ForEach(allTabSessions) { session in
                     let active = session.id == activeTabId
-                    TerminalRepresentable(session: session, isActive: active)
+                    TerminalRepresentable(session: session, isActive: active, theme: currentTheme)
                         .opacity(active ? 1 : 0)
                         .allowsHitTesting(active)
                 }
@@ -330,7 +336,7 @@ struct WorktreeDetailView: View {
                 // Persist all runner sessions across worktree switches
                 ForEach(allRunnerSessions) { session in
                     let active = session.id == activeRunnerTabId
-                    TerminalRepresentable(session: session, isActive: active)
+                    TerminalRepresentable(session: session, isActive: active, theme: currentTheme)
                         .opacity(active ? 1 : 0)
                         .allowsHitTesting(active)
                 }
