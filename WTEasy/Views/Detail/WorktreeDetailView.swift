@@ -9,9 +9,8 @@ struct WorktreeDetailView: View {
     let worktree: Worktree
     let terminalSessionManager: TerminalSessionManager
     @Binding var showRightPanel: Bool
+    @Binding var showRunnerPanel: Bool
 
-    @State private var runnerTerminalSessions: [TerminalSession] = []
-    @State private var selectedRunnerTab: String?
     @State private var diffFiles: [DiffFile] = []
     @State private var selectedDiffFile: DiffFile?
 
@@ -27,8 +26,24 @@ struct WorktreeDetailView: View {
 
     private var allTabSessions: [TerminalSession] {
         terminalSessionManager.sessions.values
-            .filter { !$0.worktreeId.isEmpty }
+            .filter { !$0.worktreeId.isEmpty && !$0.id.hasPrefix("runner-") }
             .sorted { $0.id < $1.id }
+    }
+
+    private var runnerTabs: [TerminalSession] {
+        terminalSessionManager.runnerSessions(forWorktree: worktreeId)
+    }
+
+    private var activeRunnerTabId: String? {
+        terminalSessionManager.activeRunnerSessionId[worktreeId]
+    }
+
+    private var allRunnerSessions: [TerminalSession] {
+        terminalSessionManager.allRunnerSessions()
+    }
+
+    private var hasRunConfigurations: Bool {
+        !(worktree.project?.profile?.runConfigurations.isEmpty ?? true)
     }
 
     var body: some View {
@@ -39,12 +54,12 @@ struct WorktreeDetailView: View {
                 tabbedTerminalView
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                // Bottom: Runner terminal tabs
-                if !runnerTerminalSessions.isEmpty {
+                // Bottom: Runner terminal panel
+                if showRunnerPanel && !allRunnerSessions.isEmpty {
                     Divider()
                     runnerTerminalsView
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .frame(minHeight: 150, maxHeight: 300)
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: 150, idealHeight: 250, maxHeight: 350)
                 }
             }
 
@@ -75,6 +90,39 @@ struct WorktreeDetailView: View {
                 workingDirectory: worktree.path
             )
         }
+    }
+
+    // MARK: - Run Actions
+
+    private func startRunners() {
+        guard let configs = worktree.project?.profile?.runConfigurations
+            .sorted(by: { $0.order < $1.order }) else { return }
+        for config in configs where !config.command.isEmpty {
+            let sessionId = "runner-\(worktreeId)-\(config.name)"
+            _ = terminalSessionManager.createRunnerSession(
+                id: sessionId,
+                title: config.name,
+                worktreeId: worktreeId,
+                workingDirectory: worktree.path,
+                initialCommand: config.command
+            )
+        }
+    }
+
+    private func stopAllRunners() {
+        for session in runnerTabs {
+            terminalSessionManager.stopSession(id: session.id)
+        }
+    }
+
+    private func restartAllRunners() {
+        for session in runnerTabs {
+            terminalSessionManager.restartSession(id: session.id)
+        }
+    }
+
+    private func removeAllRunners() {
+        terminalSessionManager.removeRunnerSessions(forWorktree: worktreeId)
     }
 
     // MARK: - Tabbed Terminal
@@ -109,6 +157,22 @@ struct WorktreeDetailView: View {
             }
 
             Spacer()
+
+            // Run button
+            if hasRunConfigurations {
+                if runnerTabs.isEmpty {
+                    Button {
+                        startRunners()
+                        showRunnerPanel = true
+                    } label: {
+                        Image(systemName: "play.fill")
+                            .font(.caption)
+                            .padding(6)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Run All Configurations")
+                }
+            }
 
             Button {
                 _ = terminalSessionManager.createTab(
@@ -156,32 +220,121 @@ struct WorktreeDetailView: View {
     @ViewBuilder
     private var runnerTerminalsView: some View {
         VStack(spacing: 0) {
-            // Tab bar
+            runnerTabBar
+            ZStack {
+                // Persist all runner sessions across worktree switches
+                ForEach(allRunnerSessions) { session in
+                    let active = session.id == activeRunnerTabId
+                    TerminalRepresentable(session: session, isActive: active)
+                        .opacity(active ? 1 : 0)
+                        .allowsHitTesting(active)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var runnerTabBar: some View {
+        HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
-                    ForEach(runnerTerminalSessions) { session in
-                        Button {
-                            selectedRunnerTab = session.id
-                        } label: {
-                            Text(session.title)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(selectedRunnerTab == session.id
-                                    ? Color.accentColor.opacity(0.2)
-                                    : Color.clear)
-                        }
-                        .buttonStyle(.plain)
+                    ForEach(runnerTabs) { session in
+                        runnerTab(session: session)
                     }
                 }
             }
-            .background(.bar)
 
-            // Selected runner terminal
-            if let tabID = selectedRunnerTab,
-               let session = runnerTerminalSessions.first(where: { $0.id == tabID }) {
-                TerminalRepresentable(session: session)
+            Spacer()
+
+            if !runnerTabs.isEmpty {
+                // Restart all
+                Button {
+                    restartAllRunners()
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.caption)
+                        .padding(4)
+                }
+                .buttonStyle(.plain)
+                .help("Restart All")
+
+                // Stop all
+                Button {
+                    stopAllRunners()
+                } label: {
+                    Image(systemName: "stop.fill")
+                        .font(.caption)
+                        .padding(4)
+                }
+                .buttonStyle(.plain)
+                .help("Stop All")
+
+                // Close/remove all runners
+                Button {
+                    removeAllRunners()
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .font(.caption)
+                        .padding(4)
+                }
+                .buttonStyle(.plain)
+                .help("Close All Runners")
             }
+
+            // Collapse chevron
+            Button {
+                showRunnerPanel = false
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.caption)
+                    .padding(4)
+            }
+            .buttonStyle(.plain)
+            .help("Collapse Runner Panel")
+            .padding(.trailing, 4)
         }
+        .background(.bar)
+    }
+
+    @ViewBuilder
+    private func runnerTab(session: TerminalSession) -> some View {
+        HStack(spacing: 4) {
+            // Running indicator dot
+            Circle()
+                .fill(.green)
+                .frame(width: 6, height: 6)
+
+            Button {
+                terminalSessionManager.setActiveRunnerSession(worktreeId: worktreeId, sessionId: session.id)
+            } label: {
+                Text(session.title)
+                    .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+
+            // Restart
+            Button {
+                terminalSessionManager.restartSession(id: session.id)
+            } label: {
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.system(size: 8))
+            }
+            .buttonStyle(.plain)
+            .help("Restart")
+
+            // Stop
+            Button {
+                terminalSessionManager.stopSession(id: session.id)
+            } label: {
+                Image(systemName: "stop.fill")
+                    .font(.system(size: 8))
+            }
+            .buttonStyle(.plain)
+            .help("Stop")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(session.id == activeRunnerTabId ? Color.accentColor.opacity(0.2) : Color.clear)
     }
 
     // MARK: - Diff Panel

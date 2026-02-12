@@ -10,6 +10,7 @@ struct ContentView: View {
     @State private var selectedWorktreeID: String?
     @State private var showingAddProject = false
     @State private var showRightPanel = false
+    @State private var showRunnerPanel = false
     @State private var terminalSessionManager = TerminalSessionManager()
 
     var body: some View {
@@ -17,7 +18,8 @@ struct ContentView: View {
             SidebarView(
                 projects: projects,
                 selectedWorktreeID: $selectedWorktreeID,
-                showingAddProject: $showingAddProject
+                showingAddProject: $showingAddProject,
+                terminalSessionManager: terminalSessionManager
             )
             .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 320)
         } detail: {
@@ -26,7 +28,8 @@ struct ContentView: View {
                 WorktreeDetailView(
                     worktree: worktree,
                     terminalSessionManager: terminalSessionManager,
-                    showRightPanel: $showRightPanel
+                    showRightPanel: $showRightPanel,
+                    showRunnerPanel: $showRunnerPanel
                 )
             } else {
                 ContentUnavailableView(
@@ -38,13 +41,23 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showRightPanel.toggle()
-                } label: {
-                    Image(systemName: "sidebar.right")
+                HStack(spacing: 4) {
+                    Button {
+                        showRunnerPanel.toggle()
+                    } label: {
+                        Image(systemName: "play.rectangle")
+                    }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                    .help("Toggle Runner Panel (Cmd+Shift+R)")
+
+                    Button {
+                        showRightPanel.toggle()
+                    } label: {
+                        Image(systemName: "sidebar.right")
+                    }
+                    .keyboardShortcut("d", modifiers: [.command, .shift])
+                    .help("Toggle Diff Panel (Cmd+Shift+D)")
                 }
-                .keyboardShortcut("d", modifiers: [.command, .shift])
-                .help("Toggle Diff Panel (Cmd+Shift+D)")
             }
         }
         .sheet(isPresented: $showingAddProject) {

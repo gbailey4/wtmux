@@ -18,7 +18,8 @@ public struct TerminalRepresentable: NSViewRepresentable {
 
         let view = DeferredStartTerminalView(
             workingDirectory: session.workingDirectory,
-            shellPath: session.shellPath
+            shellPath: session.shellPath,
+            initialCommand: session.initialCommand
         )
         let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         view.font = font
@@ -39,11 +40,13 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
     private var processStarted = false
     private let workingDirectory: String
     private let shellPath: String
+    private let initialCommand: String?
     private var resizeTimer: Timer?
 
-    public init(workingDirectory: String, shellPath: String) {
+    public init(workingDirectory: String, shellPath: String, initialCommand: String? = nil) {
         self.workingDirectory = workingDirectory
         self.shellPath = shellPath
+        self.initialCommand = initialCommand
         super.init(frame: .zero)
     }
 
@@ -170,5 +173,17 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
                 kill(pid, SIGWINCH)
             }
         }
+
+        // Send initial command after shell has time to initialize
+        if let command = initialCommand, !command.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                self?.sendCommand(command)
+            }
+        }
+    }
+
+    /// Sends a command string to the PTY followed by a newline.
+    public func sendCommand(_ command: String) {
+        send(txt: command + "\n")
     }
 }

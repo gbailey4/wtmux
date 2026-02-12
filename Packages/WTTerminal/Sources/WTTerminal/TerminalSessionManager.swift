@@ -88,4 +88,88 @@ public final class TerminalSessionManager: @unchecked Sendable {
         activeSessionId.removeAll()
         tabCounters.removeAll()
     }
+
+    // MARK: - Runner Sessions
+
+    /// Active runner tab per worktree (keyed by worktreeId).
+    public private(set) var activeRunnerSessionId: [String: String] = [:]
+
+    public func createRunnerSession(
+        id: String,
+        title: String,
+        worktreeId: String,
+        workingDirectory: String,
+        initialCommand: String
+    ) -> TerminalSession {
+        if let existing = sessions[id] {
+            return existing
+        }
+        let session = TerminalSession(
+            id: id,
+            title: title,
+            worktreeId: worktreeId,
+            workingDirectory: workingDirectory,
+            initialCommand: initialCommand
+        )
+        sessions[id] = session
+        // Auto-select the first runner as active
+        if activeRunnerSessionId[worktreeId] == nil {
+            activeRunnerSessionId[worktreeId] = id
+        }
+        return session
+    }
+
+    public func runnerSessions(forWorktree worktreeId: String) -> [TerminalSession] {
+        sessions.values
+            .filter { $0.worktreeId == worktreeId && $0.id.hasPrefix("runner-") }
+            .sorted { $0.id < $1.id }
+    }
+
+    public func allRunnerSessions() -> [TerminalSession] {
+        sessions.values
+            .filter { $0.id.hasPrefix("runner-") }
+            .sorted { $0.id < $1.id }
+    }
+
+    public func hasRunningSessions(forWorktree worktreeId: String) -> Bool {
+        sessions.values.contains { $0.worktreeId == worktreeId && $0.id.hasPrefix("runner-") }
+    }
+
+    public func worktreeIdsWithRunners() -> Set<String> {
+        Set(sessions.values.filter { $0.id.hasPrefix("runner-") }.map(\.worktreeId))
+    }
+
+    public func removeRunnerSessions(forWorktree worktreeId: String) {
+        let toRemove = runnerSessions(forWorktree: worktreeId)
+        for session in toRemove {
+            session.terminalView?.terminate()
+            session.terminalView = nil
+            sessions.removeValue(forKey: session.id)
+        }
+        activeRunnerSessionId.removeValue(forKey: worktreeId)
+    }
+
+    public func setActiveRunnerSession(worktreeId: String, sessionId: String) {
+        activeRunnerSessionId[worktreeId] = sessionId
+    }
+
+    /// Sends Ctrl+C then re-sends the initial command after a short delay.
+    public func restartSession(id: String) {
+        guard let session = sessions[id],
+              let view = session.terminalView,
+              let command = session.initialCommand else { return }
+        // Send Ctrl+C
+        view.send([0x03])
+        // Re-send command after brief delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            view.sendCommand(command)
+        }
+    }
+
+    /// Sends Ctrl+C to a runner session to stop it.
+    public func stopSession(id: String) {
+        guard let session = sessions[id],
+              let view = session.terminalView else { return }
+        view.send([0x03])
+    }
 }

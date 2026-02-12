@@ -1,22 +1,31 @@
 import SwiftUI
 import SwiftData
 import WTCore
+import WTTerminal
 
 struct SidebarView: View {
     let projects: [Project]
     @Binding var selectedWorktreeID: String?
     @Binding var showingAddProject: Bool
+    let terminalSessionManager: TerminalSessionManager
 
     @Environment(\.modelContext) private var modelContext
     @State private var worktreeTargetProject: Project?
     @State private var editingProject: Project?
+
+    private var runningWorktreeIds: Set<String> {
+        terminalSessionManager.worktreeIdsWithRunners()
+    }
 
     var body: some View {
         List(selection: $selectedWorktreeID) {
             ForEach(projects) { project in
                 Section {
                     ForEach(project.worktrees.sorted(by: { $0.createdAt < $1.createdAt })) { worktree in
-                        WorktreeRow(worktree: worktree)
+                        WorktreeRow(
+                            worktree: worktree,
+                            isRunning: runningWorktreeIds.contains(worktree.branchName)
+                        )
                             .tag(worktree.branchName)
                             .contextMenu {
                                 Button("Delete Worktree", role: .destructive) {
@@ -98,6 +107,7 @@ struct ProjectRow: View {
 
 struct WorktreeRow: View {
     let worktree: Worktree
+    var isRunning: Bool = false
 
     var body: some View {
         HStack {
@@ -105,8 +115,15 @@ struct WorktreeRow: View {
                 .foregroundStyle(statusColor)
                 .font(.caption)
             VStack(alignment: .leading, spacing: 2) {
-                Text(worktree.branchName)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(worktree.branchName)
+                        .lineLimit(1)
+                    if isRunning {
+                        Circle()
+                            .fill(.green)
+                            .frame(width: 6, height: 6)
+                    }
+                }
                 Text(worktree.baseBranch)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
