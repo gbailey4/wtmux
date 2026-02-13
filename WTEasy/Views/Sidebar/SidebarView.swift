@@ -11,6 +11,7 @@ struct SidebarView: View {
     @Binding var selectedWorktreeID: String?
     @Binding var showingAddProject: Bool
     let terminalSessionManager: TerminalSessionManager
+    let claudeStatusManager: ClaudeStatusManager
 
     @Environment(\.modelContext) private var modelContext
     @State private var worktreeTargetProject: Project?
@@ -34,6 +35,7 @@ struct SidebarView: View {
                         WorktreeRow(
                             worktree: worktree,
                             isRunning: runningWorktreeIds.contains(worktree.branchName),
+                            claudeStatus: claudeStatusManager.status(forWorktreePath: worktree.path),
                             onDelete: {
                                 worktreeToDelete = worktree
                                 showDeleteConfirmation = true
@@ -271,6 +273,7 @@ struct ProjectRow: View {
 struct WorktreeRow: View {
     let worktree: Worktree
     var isRunning: Bool = false
+    var claudeStatus: ClaudeCodeStatus? = nil
     var onDelete: (() -> Void)?
 
     @State private var isHovered = false
@@ -288,6 +291,9 @@ struct WorktreeRow: View {
                         Circle()
                             .fill(.green)
                             .frame(width: 6, height: 6)
+                    }
+                    if let claudeStatus {
+                        claudeBadge(claudeStatus)
                     }
                 }
                 Text(worktree.baseBranch)
@@ -329,6 +335,30 @@ struct WorktreeRow: View {
         case .active: .green
         case .archived: .gray
         case .error: .red
+        }
+    }
+
+    @ViewBuilder
+    private func claudeBadge(_ status: ClaudeCodeStatus) -> some View {
+        switch status {
+        case .thinking:
+            Image(systemName: "circle.fill")
+                .font(.system(size: 6))
+                .foregroundStyle(.purple)
+                .symbolEffect(.pulse)
+        case .working:
+            Image(systemName: "circle.fill")
+                .font(.system(size: 6))
+                .foregroundStyle(.blue)
+                .symbolEffect(.pulse)
+        case .needsAttention:
+            Image(systemName: "circle.fill")
+                .font(.system(size: 6))
+                .foregroundStyle(.orange)
+        case .done:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 8))
+                .foregroundStyle(.green)
         }
     }
 }
