@@ -11,6 +11,7 @@ struct SelectedFile: Equatable {
 enum ChangeGroup: Identifiable {
     case workingChanges(files: [GitFileStatus])
     case commit(info: GitCommitInfo, files: [GitFileStatus])
+    case worktreeVsBase(files: [GitFileStatus], baseBranch: String)
 
     var id: String {
         switch self {
@@ -18,6 +19,8 @@ enum ChangeGroup: Identifiable {
             return "working-changes"
         case .commit(let info, _):
             return info.id
+        case .worktreeVsBase:
+            return "worktree-vs-base"
         }
     }
 
@@ -27,8 +30,15 @@ enum ChangeGroup: Identifiable {
             return files
         case .commit(_, let files):
             return files
+        case .worktreeVsBase(let files, _):
+            return files
         }
     }
+}
+
+enum DiffViewMode: Hashable {
+    case byCommit
+    case worktreeVsBase
 }
 
 struct ChangesPanel: View {
@@ -36,6 +46,7 @@ struct ChangesPanel: View {
     @Binding var activeDiffFile: DiffFile?
     @Binding var changedFileCount: Int
 
+    @State private var diffViewMode: DiffViewMode = .byCommit
     @State private var changeGroups: [ChangeGroup] = []
     @State private var diffCache: [String: [DiffFile]] = [:]
     @State private var selectedFile: SelectedFile?
@@ -59,13 +70,13 @@ struct ChangesPanel: View {
                 ContentUnavailableView(
                     "No Changes",
                     systemImage: "checkmark.circle",
-                    description: Text("Working directory is clean and no commits ahead of \(worktree.baseBranch)")
+                    description: Text(emptyStateDescription)
                 )
             } else {
                 outlineView
             }
         }
-        .task(id: worktree.path) {
+        .task(id: "\(worktree.path)-\(diffViewMode)") {
             await loadAllChanges()
         }
         .onChange(of: activeDiffFile?.id) { _, newValue in
@@ -83,6 +94,13 @@ struct ChangesPanel: View {
             Text("Changes")
                 .font(.headline)
             Spacer()
+            Picker("", selection: $diffViewMode) {
+                Text("By Commit").tag(DiffViewMode.byCommit)
+                Text("vs \(worktree.baseBranch)").tag(DiffViewMode.worktreeVsBase)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 160)
             if isLoading {
                 ProgressView()
                     .controlSize(.small)
@@ -116,7 +134,9 @@ struct ChangesPanel: View {
                 Task {
                     await loadDiffIfNeeded(groupId: groupId)
                     if let diffFiles = diffCache[groupId],
-                       let file = diffFiles.first(where: { $0.displayPath == path || $0.id == path }) {
+                       let file = diffFiles.first(where: {
+                           $0.displayPath == path || $0.id == path || $0.oldPath == path || $0.newPath == path
+                       }) {
                         activeDiffFile = file
                     }
                 }
@@ -155,6 +175,8 @@ struct ChangesPanel: View {
             return files
         case .commit(let info, _):
             return commitFileCache[info.id] ?? group.files
+        case .worktreeVsBase(let files, _):
+            return files
         }
     }
 
@@ -167,6 +189,15 @@ struct ChangesPanel: View {
                     .fontWeight(.medium)
                 Spacer()
                 Text("\(files.count)")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            }
+        case .worktreeVsBase(_, let baseBranch):
+            HStack(spacing: 4) {
+                Text("vs \(baseBranch)")
+                    .fontWeight(.medium)
+                Spacer()
+                Text("\(group.files.count)")
                     .foregroundStyle(.secondary)
                     .font(.caption)
             }
@@ -226,22 +257,42 @@ struct ChangesPanel: View {
         defer { isLoading = false }
 
         var groups: [ChangeGroup] = []
-
         let baseBranch = worktree.baseBranch
 
         do {
-            async let statusResult = git.status()
-            async let logResult = git.log(since: baseBranch)
+            switch diffViewMode {
+            case .byCommit:
+                async let statusResult = git.status()
+                async let logResult = git.log(since: baseBranch)
 
-            let files = try await statusResult
-            let commits = try await logResult
+                let files = try await statusResult
+                let commits = try await logResult
 
-            if !files.isEmpty {
-                groups.append(.workingChanges(files: files))
-            }
+                if !files.isEmpty {
+                    groups.append(.workingChanges(files: files))
+                }
 
-            for commit in commits {
-                groups.append(.commit(info: commit, files: []))
+                for commit in commits {
+                    groups.append(.commit(info: commit, files: []))
+                }
+
+            case .worktreeVsBase:
+                let diffOutput = try await git.worktreeDiffVsBranch(baseBranch)
+                let parser = DiffParser()
+                let diffFiles = parser.parse(diffOutput)
+                var files = diffFiles.map { gitFileStatus(from: $0) }
+
+                let statusFiles = try await git.status()
+                let existingPaths = Set(files.map(\.path))
+                for statusFile in statusFiles where statusFile.status == .untracked {
+                    if !existingPaths.contains(statusFile.path) {
+                        files.append(statusFile)
+                    }
+                }
+
+                if !files.isEmpty {
+                    groups.append(.worktreeVsBase(files: files, baseBranch: baseBranch))
+                }
             }
         } catch {
             // Silently handle errors — the panel will show empty state
@@ -249,19 +300,43 @@ struct ChangesPanel: View {
 
         changeGroups = groups
 
-        // Update badge count: number of working-changes files
-        let workingCount = groups
-            .first(where: { $0.id == "working-changes" })?.files.count ?? 0
-        changedFileCount = workingCount
+        // Update badge count
+        let count: Int
+        switch diffViewMode {
+        case .byCommit:
+            count = groups.first(where: { $0.id == "working-changes" })?.files.count ?? 0
+        case .worktreeVsBase:
+            count = groups.first(where: { $0.id == "worktree-vs-base" })?.files.count ?? 0
+        }
+        changedFileCount = count
 
         if groups.isEmpty {
             expandedGroups = []
         } else {
-            expandedGroups = ["working-changes"]
+            expandedGroups = [groups[0].id]
         }
         selectedFile = nil
         diffCache = [:]
         commitFileCache = [:]
+    }
+
+    private func gitFileStatus(from diffFile: DiffFile) -> GitFileStatus {
+        let status: FileStatusKind
+        let path: String
+        if diffFile.oldPath == "dev/null" {
+            status = .added
+            path = diffFile.newPath
+        } else if diffFile.newPath == "dev/null" {
+            status = .deleted
+            path = diffFile.oldPath
+        } else if diffFile.oldPath != diffFile.newPath {
+            status = .renamed
+            path = diffFile.newPath
+        } else {
+            status = .modified
+            path = diffFile.displayPath
+        }
+        return GitFileStatus(path: path, status: status)
     }
 
     private func loadCommitFiles(hash: String) async {
@@ -281,6 +356,8 @@ struct ChangesPanel: View {
             let diffOutput: String
             if groupId == "working-changes" {
                 diffOutput = try await git.workingDiff()
+            } else if groupId == "worktree-vs-base" {
+                diffOutput = try await git.worktreeDiffVsBranch(worktree.baseBranch)
             } else {
                 diffOutput = try await git.commitDiff(hash: groupId)
             }
@@ -288,8 +365,8 @@ struct ChangesPanel: View {
             var parsed = parser.parse(diffOutput)
 
             // Synthesize diffs for untracked files (git diff doesn't include them)
-            if groupId == "working-changes" {
-                let workingFiles = changeGroups.first(where: { $0.id == "working-changes" })?.files ?? []
+            if groupId == "working-changes" || groupId == "worktree-vs-base" {
+                let workingFiles = changeGroups.first(where: { $0.id == groupId })?.files ?? []
                 for file in workingFiles where file.status == .untracked {
                     guard !parsed.contains(where: { $0.displayPath == file.path || $0.id == file.path }) else { continue }
                     if let synthetic = syntheticDiffFile(relativePath: file.path) {
@@ -347,6 +424,15 @@ struct ChangesPanel: View {
     }
 
     // MARK: - Helpers
+
+    private var emptyStateDescription: String {
+        switch diffViewMode {
+        case .byCommit:
+            return "Working directory is clean and no commits ahead of \(worktree.baseBranch)"
+        case .worktreeVsBase:
+            return "Worktree matches \(worktree.baseBranch)"
+        }
+    }
 
     private static let relativeDateFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()

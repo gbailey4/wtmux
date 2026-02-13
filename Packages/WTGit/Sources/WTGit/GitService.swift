@@ -140,6 +140,18 @@ public actor GitService {
         return result.stdout
     }
 
+    /// Returns a unified diff of the working tree (staged + unstaged) against the given branch.
+    public func worktreeDiffVsBranch(_ branch: String) async throws -> String {
+        let result = try await transport.execute(
+            [gitPath, "diff", branch],
+            in: repoPath
+        )
+        guard result.succeeded else {
+            throw GitError.commandFailed(result.stderr)
+        }
+        return result.stdout
+    }
+
     /// Returns commits on the current branch since it diverged from `baseBranch`, newest-first.
     public func log(since baseBranch: String) async throws -> [GitCommitInfo] {
         let result = try await transport.execute(
