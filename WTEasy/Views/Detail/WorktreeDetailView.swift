@@ -42,6 +42,11 @@ struct WorktreeDetailView: View {
             .sorted { $0.id < $1.id }
     }
 
+    private var runConfigurations: [RunConfiguration] {
+        worktree.project?.profile?.runConfigurations
+            .sorted(by: { $0.order < $1.order }) ?? []
+    }
+
     private var runnerTabs: [TerminalSession] {
         terminalSessionManager.runnerSessions(forWorktree: worktreeId)
     }
@@ -78,6 +83,9 @@ struct WorktreeDetailView: View {
                         runnerTerminalsView
                             .frame(maxWidth: .infinity)
                             .frame(minHeight: 150, idealHeight: 250, maxHeight: 350)
+                    } else if showRunnerPanel && hasRunConfigurations {
+                        Divider()
+                        runnerReadyView
                     } else if !configRunnerTabs.isEmpty || hasRunConfigurations {
                         Divider()
                         runnerStatusBar
@@ -143,13 +151,9 @@ struct WorktreeDetailView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
+                    showRunnerPanel.toggle()
                     if showRunnerPanel {
-                        showRunnerPanel = false
-                    } else {
-                        if configRunnerTabs.isEmpty {
-                            startRunners()
-                        }
-                        showRunnerPanel = true
+                        launchAutoStartRunners()
                     }
                 } label: {
                     Image(systemName: "play.rectangle")
@@ -275,20 +279,40 @@ struct WorktreeDetailView: View {
     }
 
     private func launchRunners() {
-        guard let configs = worktree.project?.profile?.runConfigurations
-            .sorted(by: { $0.order < $1.order }) else { return }
-        for config in configs where !config.command.isEmpty {
-            let sessionId = "runner-\(worktreeId)-\(config.name)"
-            let session = terminalSessionManager.createRunnerSession(
-                id: sessionId,
-                title: config.name,
-                worktreeId: worktreeId,
-                workingDirectory: worktree.path,
-                initialCommand: config.command
-            )
-            session.onProcessExit = { [weak terminalSessionManager] sessionId, exitCode in
-                terminalSessionManager?.handleProcessExit(sessionId: sessionId, exitCode: exitCode)
-            }
+        for config in runConfigurations where !config.command.isEmpty {
+            launchSingleRunner(config: config)
+        }
+    }
+
+    private func launchAutoStartRunners() {
+        let autoStartConfigs = runConfigurations.filter { $0.autoStart && !$0.command.isEmpty }
+        guard !autoStartConfigs.isEmpty else { return }
+        // Check for conflicts before launching
+        if let conflict = conflictingWorktree() {
+            conflictingWorktreeName = conflict.name
+            conflictingPorts = conflictingPortList()
+            showRunnerConflictAlert = true
+            return
+        }
+        for config in autoStartConfigs {
+            launchSingleRunner(config: config)
+        }
+    }
+
+    private func launchSingleRunner(config: RunConfiguration) {
+        guard !config.command.isEmpty else { return }
+        let sessionId = "runner-\(worktreeId)-\(config.name)"
+        // Don't re-create if session already exists
+        guard terminalSessionManager.sessions[sessionId] == nil else { return }
+        let session = terminalSessionManager.createRunnerSession(
+            id: sessionId,
+            title: config.name,
+            worktreeId: worktreeId,
+            workingDirectory: worktree.path,
+            initialCommand: config.command
+        )
+        session.onProcessExit = { [weak terminalSessionManager] sessionId, exitCode in
+            terminalSessionManager?.handleProcessExit(sessionId: sessionId, exitCode: exitCode)
         }
     }
 
@@ -342,19 +366,17 @@ struct WorktreeDetailView: View {
             Spacer()
 
             // Run button
-            if hasRunConfigurations {
-                if configRunnerTabs.isEmpty {
-                    Button {
-                        startRunners()
-                        showRunnerPanel = true
-                    } label: {
-                        Image(systemName: "play.fill")
-                            .font(.caption)
-                            .padding(6)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Run All Configurations")
+            if hasRunConfigurations && configRunnerTabs.isEmpty {
+                Button {
+                    showRunnerPanel = true
+                    launchAutoStartRunners()
+                } label: {
+                    Image(systemName: "play.fill")
+                        .font(.caption)
+                        .padding(6)
                 }
+                .buttonStyle(.plain)
+                .help("Open Runner Panel")
             }
 
             Button {
@@ -556,16 +578,104 @@ struct WorktreeDetailView: View {
         .background(session.id == activeRunnerTabId ? Color.accentColor.opacity(0.2) : Color.clear)
     }
 
+    // MARK: - Runner Ready View
+
+    @ViewBuilder
+    private var runnerReadyView: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Text("Runners")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 10)
+
+                Spacer()
+
+                Button {
+                    startRunners()
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 9))
+                        Text("Start All")
+                            .font(.caption)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                }
+                .buttonStyle(.plain)
+                .help("Start All Runners")
+
+                Button {
+                    showRunnerPanel = false
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.caption)
+                        .padding(4)
+                }
+                .buttonStyle(.plain)
+                .help("Collapse Runner Panel")
+                .padding(.trailing, 4)
+            }
+            .padding(.vertical, 4)
+            .background(.bar)
+
+            ForEach(runConfigurations) { config in
+                HStack(spacing: 8) {
+                    Button {
+                        if let conflict = conflictingWorktree() {
+                            conflictingWorktreeName = conflict.name
+                            conflictingPorts = conflictingPortList()
+                            showRunnerConflictAlert = true
+                        } else {
+                            launchSingleRunner(config: config)
+                        }
+                    } label: {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Start \(config.name)")
+
+                    Text(config.name)
+                        .font(.caption)
+                        .lineLimit(1)
+
+                    Text(config.command)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    Spacer()
+
+                    if config.autoStart {
+                        Text("auto")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 3))
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
     // MARK: - Runner Status Bar
 
     @ViewBuilder
     private var runnerStatusBar: some View {
         let _ = terminalSessionManager.runnerStateVersion
         Button {
-            if configRunnerTabs.isEmpty {
-                startRunners()
-            }
             showRunnerPanel = true
+            if configRunnerTabs.isEmpty {
+                launchAutoStartRunners()
+            }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.up")

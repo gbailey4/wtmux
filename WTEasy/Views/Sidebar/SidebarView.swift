@@ -1,7 +1,10 @@
+import AppKit
 import SwiftUI
 import SwiftData
 import WTCore
+import WTGit
 import WTTerminal
+import WTTransport
 
 struct SidebarView: View {
     let projects: [Project]
@@ -12,6 +15,10 @@ struct SidebarView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var worktreeTargetProject: Project?
     @State private var editingProject: Project?
+    @State private var worktreeToDelete: Worktree?
+    @State private var showDeleteConfirmation = false
+    @State private var deleteError: String?
+    @State private var showDeleteError = false
 
     private var runningWorktreeIds: Set<String> {
         // Read runnerStateVersion to trigger re-evaluation when runners stop/restart
@@ -26,13 +33,15 @@ struct SidebarView: View {
                     ForEach(project.worktrees.sorted(by: { $0.createdAt < $1.createdAt })) { worktree in
                         WorktreeRow(
                             worktree: worktree,
-                            isRunning: runningWorktreeIds.contains(worktree.branchName)
+                            isRunning: runningWorktreeIds.contains(worktree.branchName),
+                            onDelete: {
+                                worktreeToDelete = worktree
+                                showDeleteConfirmation = true
+                            }
                         )
                             .tag(worktree.branchName)
                             .contextMenu {
-                                Button("Delete Worktree", role: .destructive) {
-                                    deleteWorktree(worktree, from: project)
-                                }
+                                worktreeContextMenu(worktree: worktree)
                             }
                     }
                 } header: {
@@ -79,11 +88,163 @@ struct SidebarView: View {
         .sheet(item: $editingProject) { project in
             ProjectSettingsView(project: project)
         }
+        .alert("Delete Worktree?", isPresented: $showDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                if let wt = worktreeToDelete {
+                    Task { await deleteWorktreeWithGit(wt) }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                worktreeToDelete = nil
+            }
+        } message: {
+            if let wt = worktreeToDelete {
+                Text("This will remove the worktree \"\(wt.branchName)\" and delete its directory from disk. Any uncommitted changes will be lost.")
+            }
+        }
+        .alert("Delete Failed", isPresented: $showDeleteError) {
+            Button("OK") { deleteError = nil }
+        } message: {
+            Text(deleteError ?? "An unknown error occurred.")
+        }
     }
 
-    private func deleteWorktree(_ worktree: Worktree, from project: Project) {
-        modelContext.delete(worktree)
-        try? modelContext.save()
+    // MARK: - Context Menu
+
+    @ViewBuilder
+    private func worktreeContextMenu(worktree: Worktree) -> some View {
+        let isRunning = runningWorktreeIds.contains(worktree.branchName)
+
+        if hasRunConfigurations(for: worktree) {
+            if isRunning {
+                Button {
+                    stopRunners(for: worktree)
+                } label: {
+                    Label("Stop Runners", systemImage: "stop.fill")
+                }
+            } else {
+                Button {
+                    selectedWorktreeID = worktree.branchName
+                    startRunners(for: worktree)
+                } label: {
+                    Label("Start Runners", systemImage: "play.fill")
+                }
+            }
+
+            Divider()
+        }
+
+        Button {
+            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: worktree.path)
+        } label: {
+            Label("Open in Finder", systemImage: "folder")
+        }
+
+        let editors = ExternalEditor.installedEditors(custom: ExternalEditor.customEditors)
+        if !editors.isEmpty {
+            Menu {
+                ForEach(editors) { editor in
+                    Button(editor.name) {
+                        let folderURL = URL(fileURLWithPath: worktree.path, isDirectory: true)
+                        ExternalEditor.open(fileURL: folderURL, editor: editor)
+                    }
+                }
+            } label: {
+                Label("Open in Editor", systemImage: "arrow.up.forward.square")
+            }
+        }
+
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(worktree.path, forType: .string)
+        } label: {
+            Label("Copy Path", systemImage: "doc.on.doc")
+        }
+
+        Divider()
+
+        Button(role: .destructive) {
+            worktreeToDelete = worktree
+            showDeleteConfirmation = true
+        } label: {
+            Label("Delete Worktree...", systemImage: "trash")
+        }
+    }
+
+    // MARK: - Runner Helpers
+
+    private func hasRunConfigurations(for worktree: Worktree) -> Bool {
+        !(worktree.project?.profile?.runConfigurations.isEmpty ?? true)
+    }
+
+    private func startRunners(for worktree: Worktree) {
+        guard let configs = worktree.project?.profile?.runConfigurations
+            .sorted(by: { $0.order < $1.order }) else { return }
+        for config in configs where !config.command.isEmpty {
+            let sessionId = "runner-\(worktree.branchName)-\(config.name)"
+            guard terminalSessionManager.sessions[sessionId] == nil else { continue }
+            let session = terminalSessionManager.createRunnerSession(
+                id: sessionId,
+                title: config.name,
+                worktreeId: worktree.branchName,
+                workingDirectory: worktree.path,
+                initialCommand: config.command
+            )
+            session.onProcessExit = { [weak terminalSessionManager] sessionId, exitCode in
+                terminalSessionManager?.handleProcessExit(sessionId: sessionId, exitCode: exitCode)
+            }
+        }
+    }
+
+    private func stopRunners(for worktree: Worktree) {
+        for session in terminalSessionManager.runnerSessions(forWorktree: worktree.branchName) {
+            terminalSessionManager.stopSession(id: session.id)
+        }
+    }
+
+    // MARK: - Delete
+
+    private func deleteWorktreeWithGit(_ worktree: Worktree) async {
+        // 1. Stop and remove all runner sessions
+        for session in terminalSessionManager.runnerSessions(forWorktree: worktree.branchName) {
+            terminalSessionManager.stopSession(id: session.id)
+        }
+        terminalSessionManager.removeRunnerSessions(forWorktree: worktree.branchName)
+
+        // 2. Remove terminal tab sessions
+        for session in terminalSessionManager.sessions(forWorktree: worktree.branchName) {
+            terminalSessionManager.removeTab(sessionId: session.id)
+        }
+
+        // 3. Call git worktree remove
+        if let repoPath = worktree.project?.repoPath {
+            let git = GitService(transport: LocalTransport(), repoPath: repoPath)
+            do {
+                try await git.worktreeRemove(path: worktree.path)
+            } catch {
+                // Retry with force (handles uncommitted changes)
+                do {
+                    try await git.worktreeRemove(path: worktree.path, force: true)
+                } catch {
+                    await MainActor.run {
+                        deleteError = error.localizedDescription
+                        showDeleteError = true
+                        worktreeToDelete = nil
+                    }
+                    return
+                }
+            }
+        }
+
+        // 4. Delete from SwiftData and clear selection
+        await MainActor.run {
+            if selectedWorktreeID == worktree.branchName {
+                selectedWorktreeID = nil
+            }
+            modelContext.delete(worktree)
+            try? modelContext.save()
+            worktreeToDelete = nil
+        }
     }
 
     private func deleteProject(_ project: Project) {
@@ -110,6 +271,9 @@ struct ProjectRow: View {
 struct WorktreeRow: View {
     let worktree: Worktree
     var isRunning: Bool = false
+    var onDelete: (() -> Void)?
+
+    @State private var isHovered = false
 
     var body: some View {
         HStack {
@@ -131,6 +295,20 @@ struct WorktreeRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            if isHovered, let onDelete {
+                Button {
+                    onDelete()
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Delete Worktree")
+            }
+        }
+        .onHover { hovering in
+            isHovered = hovering
         }
     }
 

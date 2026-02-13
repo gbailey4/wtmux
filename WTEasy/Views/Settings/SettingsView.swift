@@ -20,8 +20,7 @@ struct SettingsView: View {
                 HStack {
                     TextField("Default Shell", text: $defaultShell)
                         .textFieldStyle(.roundedBorder)
-                        .multilineTextAlignment(.leading)
-                    Button("Browse...") {
+                        Button("Browse...") {
                         browseShell()
                     }
                 }
@@ -33,13 +32,16 @@ struct SettingsView: View {
                         .monospacedDigit()
                 }
 
-                Picker("Theme", selection: $terminalThemeId) {
-                    ForEach(TerminalThemes.allThemes) { theme in
-                        HStack(spacing: 8) {
-                            ThemeSwatchView(theme: theme)
-                            Text(theme.name)
+                HStack {
+                    Text("Theme")
+                    Picker("Theme", selection: $terminalThemeId) {
+                        ForEach(TerminalThemes.allThemes) { theme in
+                            HStack(spacing: 8) {
+                                ThemeSwatchView(theme: theme)
+                                Text(theme.name)
+                            }
+                            .tag(theme.id)
                         }
-                        .tag(theme.id)
                     }
                 }
             }
@@ -87,6 +89,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .labelsHidden()
         .frame(width: 450)
         .navigationTitle("Settings")
     }

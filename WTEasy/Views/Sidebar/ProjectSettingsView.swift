@@ -51,47 +51,72 @@ struct ProjectSettingsView: View {
         VStack(spacing: 0) {
             Form {
                 Section("Repository") {
-                    TextField("Project Name", text: $name)
-                        .textFieldStyle(.roundedBorder)
-                        .multilineTextAlignment(.leading)
-
-                    HStack {
-                        TextField("Repository Path", text: $repoPath)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Project Name")
+                            .foregroundStyle(.secondary)
+                        TextField("", text: $name)
                             .textFieldStyle(.roundedBorder)
-                            .multilineTextAlignment(.leading)
-                        Button("Browse...") {
-                            browseRepoPath()
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Repository Path")
+                            .foregroundStyle(.secondary)
+                        HStack {
+                            TextField("", text: $repoPath)
+                                .textFieldStyle(.roundedBorder)
+                            Button("Browse...") {
+                                browseRepoPath()
+                            }
                         }
                     }
 
-                    TextField("Default Branch", text: $defaultBranch)
-                        .textFieldStyle(.roundedBorder)
-                        .multilineTextAlignment(.leading)
-
-                    HStack {
-                        TextField("Worktree Base Path", text: $worktreeBasePath)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Default Branch")
+                            .foregroundStyle(.secondary)
+                        TextField("", text: $defaultBranch)
                             .textFieldStyle(.roundedBorder)
-                            .multilineTextAlignment(.leading)
-                        Button("Browse...") {
-                            browseWorktreeBasePath()
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Worktree Base Path")
+                            .foregroundStyle(.secondary)
+                        HStack {
+                            TextField("", text: $worktreeBasePath)
+                                .textFieldStyle(.roundedBorder)
+                            Button("Browse...") {
+                                browseWorktreeBasePath()
+                            }
                         }
                     }
                     .help("Directory where worktrees will be created")
                 }
 
                 Section("Connection") {
-                    Toggle("Remote (SSH)", isOn: $isRemote)
+                    HStack {
+                        Text("Remote (SSH)")
+                        Spacer()
+                        Toggle("", isOn: $isRemote)
+                    }
 
                     if isRemote {
-                        TextField("SSH Host", text: $sshHost)
-                            .textFieldStyle(.roundedBorder)
-                            .multilineTextAlignment(.leading)
-                        TextField("SSH User", text: $sshUser)
-                            .textFieldStyle(.roundedBorder)
-                            .multilineTextAlignment(.leading)
-                        TextField("SSH Port", text: $sshPort)
-                            .textFieldStyle(.roundedBorder)
-                            .multilineTextAlignment(.leading)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("SSH Host")
+                                .foregroundStyle(.secondary)
+                            TextField("", text: $sshHost)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("SSH User")
+                                .foregroundStyle(.secondary)
+                            TextField("", text: $sshUser)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("SSH Port")
+                                .foregroundStyle(.secondary)
+                            TextField("", text: $sshPort)
+                                .textFieldStyle(.roundedBorder)
+                        }
                     }
                 }
 
@@ -100,7 +125,6 @@ struct ProjectSettingsView: View {
                         HStack {
                             TextField("File path", text: $envFilesToCopy[index])
                                 .textFieldStyle(.roundedBorder)
-                                .multilineTextAlignment(.leading)
                                 .font(.system(.body, design: .monospaced))
                             Button(role: .destructive) {
                                 envFilesToCopy.remove(at: index)
@@ -122,7 +146,6 @@ struct ProjectSettingsView: View {
                         HStack {
                             TextField("Command", text: $setupCommands[index])
                                 .textFieldStyle(.roundedBorder)
-                                .multilineTextAlignment(.leading)
                                 .font(.system(.body, design: .monospaced))
                             Button(role: .destructive) {
                                 setupCommands.remove(at: index)
@@ -140,22 +163,29 @@ struct ProjectSettingsView: View {
                 }
 
                 Section("Terminal") {
-                    TextField("Start Command", text: $terminalStartCommand)
-                        .textFieldStyle(.roundedBorder)
-                        .multilineTextAlignment(.leading)
-                        .font(.system(.body, design: .monospaced))
-                    Text("Runs automatically in every new terminal tab (e.g. `claude`)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Start Command")
+                            .foregroundStyle(.secondary)
+                        TextField("", text: $terminalStartCommand)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                        Text("Runs automatically in every new terminal tab (e.g. `claude`)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Run Configurations") {
                     ForEach(Array(runConfigurations.enumerated()), id: \.offset) { index, _ in
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
-                                TextField("Name", text: $runConfigurations[index].name)
-                                    .textFieldStyle(.roundedBorder)
-                                    .multilineTextAlignment(.leading)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Name")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    TextField("", text: $runConfigurations[index].name)
+                                        .textFieldStyle(.roundedBorder)
+                                }
                                 Button(role: .destructive) {
                                     runConfigurations.remove(at: index)
                                 } label: {
@@ -163,19 +193,29 @@ struct ProjectSettingsView: View {
                                 }
                                 .buttonStyle(.plain)
                             }
-                            TextField("Command", text: $runConfigurations[index].command)
-                                .textFieldStyle(.roundedBorder)
-                                .multilineTextAlignment(.leading)
-                                .font(.system(.body, design: .monospaced))
-                            HStack {
-                                TextField("Port", text: $runConfigurations[index].portString)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Command")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                TextField("", text: $runConfigurations[index].command)
                                     .textFieldStyle(.roundedBorder)
-                                    .multilineTextAlignment(.leading)
-                                    .frame(width: 80)
-                                Toggle("Auto-start", isOn: $runConfigurations[index].autoStart)
+                                    .font(.system(.body, design: .monospaced))
+                            }
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Port")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    TextField("", text: $runConfigurations[index].portString)
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(width: 80)
+                                }
+                                HStack {
+                                    Toggle("", isOn: $runConfigurations[index].autoStart)
+                                    Text("Auto-start")
+                                }
                             }
                         }
-                        .labelsHidden()
                         .padding(.vertical, 4)
                     }
                     Button {
@@ -186,6 +226,7 @@ struct ProjectSettingsView: View {
                 }
             }
             .formStyle(.grouped)
+            .labelsHidden()
             .padding()
 
             Divider()

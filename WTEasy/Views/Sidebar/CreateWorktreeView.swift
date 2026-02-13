@@ -21,9 +21,12 @@ struct CreateWorktreeView: View {
                 TextField("Branch Name", text: $branchName)
                     .textFieldStyle(.roundedBorder)
 
-                Picker("Base Branch", selection: $baseBranch) {
-                    ForEach(availableBranches, id: \.self) { branch in
-                        Text(branch).tag(branch)
+                HStack {
+                    Text("Base Branch")
+                    Picker("Base Branch", selection: $baseBranch) {
+                        ForEach(availableBranches, id: \.self) { branch in
+                            Text(branch).tag(branch)
+                        }
                     }
                 }
 
@@ -34,6 +37,7 @@ struct CreateWorktreeView: View {
                 }
             }
             .formStyle(.grouped)
+            .labelsHidden()
             .padding()
 
             Divider()
