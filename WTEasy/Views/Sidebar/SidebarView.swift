@@ -341,6 +341,10 @@ struct WorktreeRow: View {
     @ViewBuilder
     private func claudeBadge(_ status: ClaudeCodeStatus) -> some View {
         switch status {
+        case .idle:
+            Image(systemName: "circle.fill")
+                .font(.system(size: 6))
+                .foregroundStyle(.secondary)
         case .thinking:
             Image(systemName: "circle.fill")
                 .font(.system(size: 6))

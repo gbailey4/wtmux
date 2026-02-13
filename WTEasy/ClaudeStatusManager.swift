@@ -4,6 +4,7 @@ import os.log
 private let logger = Logger(subsystem: "com.grahampark.wteasy", category: "ClaudeStatus")
 
 enum ClaudeCodeStatus: String {
+    case idle
     case thinking
     case working
     case needsAttention
@@ -81,12 +82,11 @@ final class ClaudeStatusManager {
         case "done":
             statusByPath[worktreePath] = .done
             sessionsByPath[worktreePath] = sessionId
-            // Auto-clear done status after 5 minutes
-            let timer = Timer.scheduledTimer(withTimeInterval: 300, repeats: false) { [weak self] _ in
+            // Transition to idle after 30 seconds
+            let timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated {
                     if self?.statusByPath[worktreePath] == .done {
-                        self?.statusByPath.removeValue(forKey: worktreePath)
-                        self?.sessionsByPath.removeValue(forKey: worktreePath)
+                        self?.statusByPath[worktreePath] = .idle
                         self?.version += 1
                     }
                     self?.clearTimers.removeValue(forKey: worktreePath)

@@ -3,6 +3,7 @@ import Foundation
 // MARK: - Models
 
 enum ClaudeStatus: String {
+    case idle
     case thinking
     case working
     case needsAttention
@@ -33,7 +34,9 @@ guard let event = try? JSONDecoder().decode(HookEvent.self, from: data) else {
 let status: ClaudeStatus
 
 switch event.hook_event_name {
-case "SessionStart", "UserPromptSubmit", "PostToolUse":
+case "SessionStart":
+    status = .idle
+case "UserPromptSubmit", "PostToolUse":
     status = .thinking
 case "PreToolUse":
     if let toolName = event.tool_name, writeTools.contains(toolName) {
