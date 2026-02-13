@@ -5,6 +5,7 @@ public final class TerminalSessionManager: @unchecked Sendable {
     public private(set) var sessions: [String: TerminalSession] = [:]
     public private(set) var activeSessionId: [String: String] = [:]
     private var tabCounters: [String: Int] = [:]
+    private var portScanTimer: Timer?
 
     public init() {}
 
@@ -83,6 +84,7 @@ public final class TerminalSessionManager: @unchecked Sendable {
     }
 
     public func removeAll() {
+        stopPortScanning()
         for session in sessions.values {
             session.terminalView?.terminate()
             session.terminalView = nil
@@ -136,6 +138,7 @@ public final class TerminalSessionManager: @unchecked Sendable {
         session.state = .running
         view.sendCommand(command)
         runnerStateVersion += 1
+        startPortScanning()
     }
 
     public func runnerSessions(forWorktree worktreeId: String) -> [TerminalSession] {
@@ -161,11 +164,13 @@ public final class TerminalSessionManager: @unchecked Sendable {
     public func removeRunnerSessions(forWorktree worktreeId: String) {
         let toRemove = runnerSessions(forWorktree: worktreeId)
         for session in toRemove {
+            session.listeningPorts = []
             session.terminalView?.terminate()
             session.terminalView = nil
             sessions.removeValue(forKey: session.id)
         }
         activeRunnerSessionId.removeValue(forKey: worktreeId)
+        stopPortScanningIfIdle()
     }
 
     public func setActiveRunnerSession(worktreeId: String, sessionId: String) {
@@ -199,7 +204,9 @@ public final class TerminalSessionManager: @unchecked Sendable {
     public func handleProcessExit(sessionId: String, exitCode: Int32?) {
         guard let session = sessions[sessionId] else { return }
         session.state = (exitCode == 0) ? .succeeded : .failed
+        session.listeningPorts = []
         runnerStateVersion += 1
+        stopPortScanningIfIdle()
     }
 
     /// Sends Ctrl+C then re-sends the initial command after a short delay.
@@ -223,6 +230,47 @@ public final class TerminalSessionManager: @unchecked Sendable {
               let view = session.terminalView else { return }
         view.send([0x03])
         session.isProcessRunning = false
+        session.listeningPorts = []
         runnerStateVersion += 1
+        stopPortScanningIfIdle()
+    }
+
+    // MARK: - Port Scanning
+
+    private func startPortScanning() {
+        guard portScanTimer == nil else { return }
+        portScanTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.scanRunnerPorts()
+            }
+        }
+    }
+
+    private func stopPortScanning() {
+        portScanTimer?.invalidate()
+        portScanTimer = nil
+    }
+
+    /// Stops the timer when no runner sessions are in the `.running` state.
+    private func stopPortScanningIfIdle() {
+        let hasRunning = sessions.values.contains { $0.id.hasPrefix("runner-") && $0.state == .running }
+        if !hasRunning {
+            stopPortScanning()
+        }
+    }
+
+    private func scanRunnerPorts() {
+        var changed = false
+        for session in sessions.values where session.id.hasPrefix("runner-") && session.state == .running {
+            guard let pid = session.terminalView?.process?.shellPid, pid > 0 else { continue }
+            let ports = PortScanner.listeningPorts(forProcessTree: pid)
+            if ports != session.listeningPorts {
+                session.listeningPorts = ports
+                changed = true
+            }
+        }
+        if changed {
+            runnerStateVersion += 1
+        }
     }
 }

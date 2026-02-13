@@ -31,6 +31,9 @@ public final class TerminalSession: Identifiable, @unchecked Sendable {
     /// When true, the shell starts but `initialCommand` is not sent until explicitly triggered.
     public var deferExecution: Bool = false
 
+    /// TCP ports detected in LISTEN state from the session's process tree.
+    public var listeningPorts: Set<UInt16> = []
+
     /// Called when the process exits (for non-interactive / command mode sessions).
     /// Parameters: session ID, exit code.
     public var onProcessExit: (@MainActor (String, Int32?) -> Void)?

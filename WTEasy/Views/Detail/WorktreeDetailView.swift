@@ -623,6 +623,40 @@ struct WorktreeDetailView: View {
             }
             .buttonStyle(.plain)
 
+            // Port badges
+            ForEach(session.listeningPorts.sorted(), id: \.self) { port in
+                HStack(spacing: 2) {
+                    Button {
+                        if let url = URL(string: "http://localhost:\(port)") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } label: {
+                        Text(":\(port)")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.accentColor.opacity(0.15), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open http://localhost:\(port)")
+
+                    // Save-to-config action
+                    if let config = runConfiguration(for: session),
+                       config.port != Int(port) {
+                        Button {
+                            config.port = Int(port)
+                        } label: {
+                            Image(systemName: "arrow.down.circle")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Save port to run configuration")
+                    }
+                }
+            }
+
             // Only show controls for interactive runners (not command-mode sessions)
             if !session.runAsCommand {
                 if session.deferExecution {
@@ -736,12 +770,31 @@ struct WorktreeDetailView: View {
             if idle > 0 && idle == configRunnerTabs.count {
                 Text(runConfigSummaryText).font(.caption).foregroundStyle(.secondary)
             }
+
+            // Aggregate listening ports across all running runners
+            let allPorts = configRunnerTabs.flatMap(\.listeningPorts).sorted()
+            if !allPorts.isEmpty {
+                HStack(spacing: 3) {
+                    ForEach(allPorts, id: \.self) { port in
+                        Text(":\(port)")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.accentColor.opacity(0.15), in: Capsule())
+                    }
+                }
+            }
         }
     }
 
     private var runConfigSummaryText: String {
         let count = worktree.project?.profile?.runConfigurations.count ?? 0
         return "\(count) runner\(count == 1 ? "" : "s") available"
+    }
+
+    private func runConfiguration(for session: TerminalSession) -> RunConfiguration? {
+        runConfigurations.first { $0.name == session.title }
     }
 
 }
