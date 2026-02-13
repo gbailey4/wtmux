@@ -477,6 +477,9 @@ struct WorktreeDetailView: View {
                 if let session = activeSession, session.deferExecution {
                     Color.black.opacity(0.4)
                         .allowsHitTesting(true)
+                        .onHover { inside in
+                            if inside { NSCursor.arrow.push() } else { NSCursor.pop() }
+                        }
                     Button {
                         if let conflict = conflictingWorktree() {
                             conflictingWorktreeName = conflict.name
