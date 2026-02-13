@@ -38,13 +38,14 @@ public struct DiffContentView<HeaderAccessory: View>: View {
 
             GeometryReader { proxy in
                 ScrollView([.horizontal, .vertical]) {
-                    LazyVStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 0) {
                         ForEach(file.hunks) { hunk in
                             hunkHeader(hunk)
                             ForEach(hunk.lines) { line in
                                 diffLine(line)
                             }
                         }
+                        Spacer(minLength: 0)
                     }
                     .frame(minWidth: proxy.size.width, minHeight: proxy.size.height, alignment: .topLeading)
                 }
@@ -155,8 +156,10 @@ public struct DiffContentView<HeaderAccessory: View>: View {
                     .fixedSize(horizontal: true, vertical: false)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 1)
         .background(lineBackground(line.kind))
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Colors
