@@ -78,14 +78,11 @@ struct WorktreeDetailView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                     // Bottom: Runner terminal panel
-                    if showRunnerPanel && !allRunnerSessions.isEmpty {
+                    if showRunnerPanel && (!runnerTabs.isEmpty || hasRunConfigurations) {
                         Divider()
                         runnerTerminalsView
                             .frame(maxWidth: .infinity)
                             .frame(minHeight: 150, idealHeight: 250, maxHeight: 350)
-                    } else if showRunnerPanel && hasRunConfigurations {
-                        Divider()
-                        runnerReadyView
                     } else if !configRunnerTabs.isEmpty || hasRunConfigurations {
                         Divider()
                         runnerStatusBar
@@ -117,6 +114,9 @@ struct WorktreeDetailView: View {
             activeDiffFile = nil
             changedFileCount = 0
             await ensureFirstTab()
+            if showRunnerPanel && hasRunConfigurations {
+                ensureRunnerSessions()
+            }
             let git = GitService(transport: LocalTransport(), repoPath: worktree.path)
             if let files = try? await git.status() {
                 changedFileCount = files.count
@@ -153,6 +153,7 @@ struct WorktreeDetailView: View {
                 Button {
                     showRunnerPanel.toggle()
                     if showRunnerPanel {
+                        ensureRunnerSessions()
                         launchAutoStartRunners()
                     }
                 } label: {
@@ -279,8 +280,10 @@ struct WorktreeDetailView: View {
     }
 
     private func launchRunners() {
+        ensureRunnerSessions()
         for config in runConfigurations where !config.command.isEmpty {
-            launchSingleRunner(config: config)
+            let sessionId = "runner-\(worktreeId)-\(config.name)"
+            terminalSessionManager.startSession(id: sessionId)
         }
     }
 
@@ -295,21 +298,37 @@ struct WorktreeDetailView: View {
             return
         }
         for config in autoStartConfigs {
-            launchSingleRunner(config: config)
+            let sessionId = "runner-\(worktreeId)-\(config.name)"
+            ensureRunnerSession(config: config)
+            terminalSessionManager.startSession(id: sessionId)
         }
     }
 
     private func launchSingleRunner(config: RunConfiguration) {
         guard !config.command.isEmpty else { return }
         let sessionId = "runner-\(worktreeId)-\(config.name)"
-        // Don't re-create if session already exists
+        ensureRunnerSession(config: config)
+        terminalSessionManager.startSession(id: sessionId)
+    }
+
+    /// Creates idle (deferred) runner sessions for all configs that don't already have sessions.
+    private func ensureRunnerSessions() {
+        for config in runConfigurations where !config.command.isEmpty {
+            ensureRunnerSession(config: config)
+        }
+    }
+
+    /// Creates a single idle runner session for a config if one doesn't already exist.
+    private func ensureRunnerSession(config: RunConfiguration) {
+        let sessionId = "runner-\(worktreeId)-\(config.name)"
         guard terminalSessionManager.sessions[sessionId] == nil else { return }
         let session = terminalSessionManager.createRunnerSession(
             id: sessionId,
             title: config.name,
             worktreeId: worktreeId,
             workingDirectory: worktree.path,
-            initialCommand: config.command
+            initialCommand: config.command,
+            deferExecution: true
         )
         session.onProcessExit = { [weak terminalSessionManager] sessionId, exitCode in
             terminalSessionManager?.handleProcessExit(sessionId: sessionId, exitCode: exitCode)
@@ -369,6 +388,7 @@ struct WorktreeDetailView: View {
             if hasRunConfigurations && configRunnerTabs.isEmpty {
                 Button {
                     showRunnerPanel = true
+                    ensureRunnerSessions()
                     launchAutoStartRunners()
                 } label: {
                     Image(systemName: "play.fill")
@@ -440,6 +460,8 @@ struct WorktreeDetailView: View {
 
     @ViewBuilder
     private var runnerTerminalsView: some View {
+        let _ = terminalSessionManager.runnerStateVersion
+        let activeSession = activeRunnerTabId.flatMap { terminalSessionManager.session(for: $0) }
         VStack(spacing: 0) {
             runnerTabBar
             ZStack {
@@ -450,12 +472,42 @@ struct WorktreeDetailView: View {
                         .opacity(active ? 1 : 0)
                         .allowsHitTesting(active)
                 }
+
+                // Play overlay for idle/deferred sessions
+                if let session = activeSession, session.deferExecution {
+                    Color.black.opacity(0.4)
+                        .allowsHitTesting(true)
+                    Button {
+                        if let conflict = conflictingWorktree() {
+                            conflictingWorktreeName = conflict.name
+                            conflictingPorts = conflictingPortList()
+                            showRunnerConflictAlert = true
+                        } else {
+                            terminalSessionManager.startSession(id: session.id)
+                        }
+                    } label: {
+                        VStack(spacing: 8) {
+                            Image(systemName: "play.circle.fill")
+                                .font(.system(size: 40))
+                            Text("Start \(session.title)")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                        }
+                        .foregroundStyle(.white)
+                        .padding(20)
+                        .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
     }
 
     @ViewBuilder
     private var runnerTabBar: some View {
+        let _ = terminalSessionManager.runnerStateVersion
+        let hasIdleSessions = configRunnerTabs.contains { $0.deferExecution }
+        let hasStartedSessions = configRunnerTabs.contains { !$0.deferExecution }
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
@@ -467,7 +519,25 @@ struct WorktreeDetailView: View {
 
             Spacer()
 
-            if !configRunnerTabs.isEmpty {
+            if hasIdleSessions {
+                // Start All idle sessions
+                Button {
+                    startRunners()
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 9))
+                        Text("Start All")
+                            .font(.caption)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                }
+                .buttonStyle(.plain)
+                .help("Start All Runners")
+            }
+
+            if hasStartedSessions {
                 // Restart all
                 Button {
                     restartAllRunners()
@@ -550,120 +620,50 @@ struct WorktreeDetailView: View {
             }
             .buttonStyle(.plain)
 
-            // Only show restart/stop for interactive runners (not command-mode sessions)
+            // Only show controls for interactive runners (not command-mode sessions)
             if !session.runAsCommand {
-                // Restart
-                Button {
-                    terminalSessionManager.restartSession(id: session.id)
-                } label: {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 8))
-                }
-                .buttonStyle(.plain)
-                .help("Restart")
-
-                // Stop
-                Button {
-                    terminalSessionManager.stopSession(id: session.id)
-                } label: {
-                    Image(systemName: "stop.fill")
-                        .font(.system(size: 8))
-                }
-                .buttonStyle(.plain)
-                .help("Stop")
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(session.id == activeRunnerTabId ? Color.accentColor.opacity(0.2) : Color.clear)
-    }
-
-    // MARK: - Runner Ready View
-
-    @ViewBuilder
-    private var runnerReadyView: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                Text("Runners")
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 10)
-
-                Spacer()
-
-                Button {
-                    startRunners()
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 9))
-                        Text("Start All")
-                            .font(.caption)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                }
-                .buttonStyle(.plain)
-                .help("Start All Runners")
-
-                Button {
-                    showRunnerPanel = false
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.caption)
-                        .padding(4)
-                }
-                .buttonStyle(.plain)
-                .help("Collapse Runner Panel")
-                .padding(.trailing, 4)
-            }
-            .padding(.vertical, 4)
-            .background(.bar)
-
-            ForEach(runConfigurations) { config in
-                HStack(spacing: 8) {
+                if session.deferExecution {
+                    // Play — start the deferred command
                     Button {
                         if let conflict = conflictingWorktree() {
                             conflictingWorktreeName = conflict.name
                             conflictingPorts = conflictingPortList()
                             showRunnerConflictAlert = true
                         } else {
-                            launchSingleRunner(config: config)
+                            terminalSessionManager.startSession(id: session.id)
                         }
                     } label: {
                         Image(systemName: "play.fill")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 8))
                     }
                     .buttonStyle(.plain)
-                    .help("Start \(config.name)")
-
-                    Text(config.name)
-                        .font(.caption)
-                        .lineLimit(1)
-
-                    Text(config.command)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-
-                    Spacer()
-
-                    if config.autoStart {
-                        Text("auto")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.tertiary)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 3))
+                    .help("Start")
+                } else {
+                    // Restart
+                    Button {
+                        terminalSessionManager.restartSession(id: session.id)
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 8))
                     }
+                    .buttonStyle(.plain)
+                    .help("Restart")
+
+                    // Stop
+                    Button {
+                        terminalSessionManager.stopSession(id: session.id)
+                    } label: {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Stop")
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
             }
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(session.id == activeRunnerTabId ? Color.accentColor.opacity(0.2) : Color.clear)
     }
 
     // MARK: - Runner Status Bar
@@ -673,6 +673,7 @@ struct WorktreeDetailView: View {
         let _ = terminalSessionManager.runnerStateVersion
         Button {
             showRunnerPanel = true
+            ensureRunnerSessions()
             if configRunnerTabs.isEmpty {
                 launchAutoStartRunners()
             }
@@ -707,7 +708,8 @@ struct WorktreeDetailView: View {
     private var runnerStatusSummary: some View {
         let running = configRunnerTabs.filter { $0.state == .running }.count
         let failed = configRunnerTabs.filter { $0.state == .failed }.count
-        let stopped = configRunnerTabs.filter { $0.state != .running && $0.state != .failed }.count
+        let idle = configRunnerTabs.filter { $0.deferExecution }.count
+        let stopped = configRunnerTabs.filter { !$0.deferExecution && $0.state != .running && $0.state != .failed }.count
 
         HStack(spacing: 8) {
             if running > 0 {
@@ -722,11 +724,14 @@ struct WorktreeDetailView: View {
                     Text("\(failed) failed").font(.caption).foregroundStyle(.secondary)
                 }
             }
-            if stopped > 0 && (running > 0 || failed > 0) {
+            if stopped > 0 {
                 HStack(spacing: 3) {
                     Circle().fill(.secondary).frame(width: 6, height: 6)
                     Text("\(stopped) stopped").font(.caption).foregroundStyle(.secondary)
                 }
+            }
+            if idle > 0 && idle == configRunnerTabs.count {
+                Text(runConfigSummaryText).font(.caption).foregroundStyle(.secondary)
             }
         }
     }

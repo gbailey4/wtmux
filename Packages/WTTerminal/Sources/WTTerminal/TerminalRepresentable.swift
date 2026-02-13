@@ -21,7 +21,8 @@ public struct TerminalRepresentable: NSViewRepresentable {
         let view = DeferredStartTerminalView(
             workingDirectory: session.workingDirectory,
             shellPath: session.shellPath,
-            initialCommand: session.initialCommand
+            initialCommand: session.initialCommand,
+            deferExecution: session.deferExecution
         )
         view.runAsCommand = session.runAsCommand
         if let onExit = session.onProcessExit {
@@ -61,6 +62,7 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
     private let shellPath: String
     private let initialCommand: String?
     private var resizeTimer: Timer?
+    private var deferExecution: Bool
 
     /// When true, starts shell with `-c command` instead of interactive mode.
     public var runAsCommand: Bool = false
@@ -68,10 +70,11 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
     /// Called when the process exits (only fires for non-interactive / command mode).
     public var onProcessExit: (@MainActor (Int32?) -> Void)?
 
-    public init(workingDirectory: String, shellPath: String, initialCommand: String? = nil) {
+    public init(workingDirectory: String, shellPath: String, initialCommand: String? = nil, deferExecution: Bool = false) {
         self.workingDirectory = workingDirectory
         self.shellPath = shellPath
         self.initialCommand = initialCommand
+        self.deferExecution = deferExecution
         super.init(frame: .zero)
     }
 
@@ -219,7 +222,7 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
         }
 
         // Send initial command after shell has time to initialize (interactive mode only)
-        if !useCommandMode, let command = initialCommand, !command.isEmpty {
+        if !useCommandMode, !deferExecution, let command = initialCommand, !command.isEmpty {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                 self?.sendCommand(command)
             }

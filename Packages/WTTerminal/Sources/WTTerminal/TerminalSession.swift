@@ -28,6 +28,9 @@ public final class TerminalSession: Identifiable, @unchecked Sendable {
     /// When true, the shell runs `initialCommand` via `-c` and exits instead of staying interactive.
     public var runAsCommand: Bool = false
 
+    /// When true, the shell starts but `initialCommand` is not sent until explicitly triggered.
+    public var deferExecution: Bool = false
+
     /// Called when the process exits (for non-interactive / command mode sessions).
     /// Parameters: session ID, exit code.
     public var onProcessExit: (@MainActor (String, Int32?) -> Void)?
@@ -40,7 +43,8 @@ public final class TerminalSession: Identifiable, @unchecked Sendable {
         worktreeId: String = "",
         workingDirectory: String,
         shellPath: String = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh",
-        initialCommand: String? = nil
+        initialCommand: String? = nil,
+        deferExecution: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -48,6 +52,7 @@ public final class TerminalSession: Identifiable, @unchecked Sendable {
         self.workingDirectory = workingDirectory
         self.shellPath = shellPath
         self.initialCommand = initialCommand
-        self.state = initialCommand != nil ? .running : .idle
+        self.deferExecution = deferExecution
+        self.state = (initialCommand != nil && !deferExecution) ? .running : .idle
     }
 }

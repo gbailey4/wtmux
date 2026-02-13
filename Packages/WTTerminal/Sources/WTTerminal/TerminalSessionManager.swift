@@ -104,7 +104,8 @@ public final class TerminalSessionManager: @unchecked Sendable {
         title: String,
         worktreeId: String,
         workingDirectory: String,
-        initialCommand: String
+        initialCommand: String,
+        deferExecution: Bool = false
     ) -> TerminalSession {
         if let existing = sessions[id] {
             return existing
@@ -114,7 +115,8 @@ public final class TerminalSessionManager: @unchecked Sendable {
             title: title,
             worktreeId: worktreeId,
             workingDirectory: workingDirectory,
-            initialCommand: initialCommand
+            initialCommand: initialCommand,
+            deferExecution: deferExecution
         )
         sessions[id] = session
         // Auto-select the first runner as active
@@ -122,6 +124,18 @@ public final class TerminalSessionManager: @unchecked Sendable {
             activeRunnerSessionId[worktreeId] = id
         }
         return session
+    }
+
+    /// Triggers a deferred command on an idle session.
+    public func startSession(id: String) {
+        guard let session = sessions[id],
+              session.deferExecution,
+              let view = session.terminalView,
+              let command = session.initialCommand else { return }
+        session.deferExecution = false
+        session.state = .running
+        view.sendCommand(command)
+        runnerStateVersion += 1
     }
 
     public func runnerSessions(forWorktree worktreeId: String) -> [TerminalSession] {
