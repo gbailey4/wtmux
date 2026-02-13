@@ -13,6 +13,6 @@ let package = Package(
     ],
     targets: [
         .target(name: "WTGit", dependencies: ["WTTransport"]),
-        .testTarget(name: "WTGitTests", dependencies: ["WTGit"]),
+        .testTarget(name: "WTGitTests", dependencies: ["WTGit", "WTTransport"]),
     ]
 )

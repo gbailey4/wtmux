@@ -1,5 +1,8 @@
 import Foundation
 
+// @unchecked Sendable: All access is gated by @MainActor. The @unchecked
+// annotation is needed because @Observable's synthesised storage is not
+// Sendable-aware, but @MainActor guarantees single-threaded access.
 @MainActor @Observable
 public final class TerminalSessionManager: @unchecked Sendable {
     public private(set) var sessions: [String: TerminalSession] = [:]
@@ -45,7 +48,7 @@ public final class TerminalSessionManager: @unchecked Sendable {
     public func createTab(forWorktree worktreeId: String, workingDirectory: String, initialCommand: String? = nil) -> TerminalSession {
         let count = (tabCounters[worktreeId] ?? 0) + 1
         tabCounters[worktreeId] = count
-        let id = "tab-\(worktreeId)-\(count)"
+        let id = SessionID.tab(worktreeId: worktreeId, index: count)
         let title = "Terminal \(count)"
         let session = createSession(
             id: id,
@@ -143,22 +146,22 @@ public final class TerminalSessionManager: @unchecked Sendable {
 
     public func runnerSessions(forWorktree worktreeId: String) -> [TerminalSession] {
         sessions.values
-            .filter { $0.worktreeId == worktreeId && $0.id.hasPrefix("runner-") }
+            .filter { $0.worktreeId == worktreeId && SessionID.isRunner($0.id) }
             .sorted { $0.id < $1.id }
     }
 
     public func allRunnerSessions() -> [TerminalSession] {
         sessions.values
-            .filter { $0.id.hasPrefix("runner-") }
+            .filter { SessionID.isRunner($0.id) }
             .sorted { $0.id < $1.id }
     }
 
     public func hasRunningSessions(forWorktree worktreeId: String) -> Bool {
-        sessions.values.contains { $0.worktreeId == worktreeId && $0.id.hasPrefix("runner-") }
+        sessions.values.contains { $0.worktreeId == worktreeId && SessionID.isRunner($0.id) }
     }
 
     public func worktreeIdsWithRunners() -> Set<String> {
-        Set(sessions.values.filter { $0.id.hasPrefix("runner-") && $0.isProcessRunning }.map(\.worktreeId))
+        Set(sessions.values.filter { SessionID.isRunner($0.id) && $0.isProcessRunning }.map(\.worktreeId))
     }
 
     public func removeRunnerSessions(forWorktree worktreeId: String) {
@@ -183,7 +186,7 @@ public final class TerminalSessionManager: @unchecked Sendable {
         workingDirectory: String,
         command: String
     ) -> TerminalSession {
-        let id = "runner-\(worktreeId)-setup"
+        let id = SessionID.setup(worktreeId: worktreeId)
         if let existing = sessions[id] {
             return existing
         }
@@ -253,7 +256,7 @@ public final class TerminalSessionManager: @unchecked Sendable {
 
     /// Stops the timer when no runner sessions are in the `.running` state.
     private func stopPortScanningIfIdle() {
-        let hasRunning = sessions.values.contains { $0.id.hasPrefix("runner-") && $0.state == .running }
+        let hasRunning = sessions.values.contains { SessionID.isRunner($0.id) && $0.state == .running }
         if !hasRunning {
             stopPortScanning()
         }
@@ -261,7 +264,7 @@ public final class TerminalSessionManager: @unchecked Sendable {
 
     private func scanRunnerPorts() {
         var changed = false
-        for session in sessions.values where session.id.hasPrefix("runner-") && session.state == .running {
+        for session in sessions.values where SessionID.isRunner(session.id) && session.state == .running {
             guard let pid = session.terminalView?.process?.shellPid, pid > 0 else { continue }
             let ports = PortScanner.listeningPorts(forProcessTree: pid)
             if ports != session.listeningPorts {

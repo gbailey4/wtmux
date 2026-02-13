@@ -6,6 +6,9 @@ import WTGit
 import WTLLM
 import WTTerminal
 import WTTransport
+import os.log
+
+private let logger = Logger(subsystem: "com.wteasy", category: "AddProjectView")
 
 struct AddProjectView: View {
     @Binding var selectedWorktreeID: String?
@@ -27,7 +30,6 @@ struct AddProjectView: View {
     // Profile
     @State private var detectedEnvFiles: [String] = []
     @State private var selectedEnvFiles: Set<String> = []
-    @State private var detectedScripts: [DetectedScript] = []
     @State private var setupCommands: [String] = []
     @State private var terminalStartCommand = ""
     @State private var runConfigurations: [EditableRunConfig] = []
@@ -37,9 +39,7 @@ struct AddProjectView: View {
 
     // AI analysis
     @AppStorage("llmModel") private var llmModel = "claude-sonnet-4-5-20250929"
-    @State private var aiAnalysisState: AIAnalysisState = .idle
-    @State private var pendingAnalysis: ProjectAnalysis?
-    @State private var showAnalysisPreview = false
+    @State private var analysisManager = AIAnalysisManager()
 
     // Configure with Claude
     @State private var showFirstWorktreeAlert = false
@@ -302,15 +302,13 @@ struct AddProjectView: View {
         }
         .formStyle(.grouped)
         .padding()
-        .sheet(isPresented: $showAnalysisPreview) {
-            if let analysis = pendingAnalysis {
+        .sheet(isPresented: $analysisManager.showAnalysisPreview) {
+            if let analysis = analysisManager.pendingAnalysis {
                 AIAnalysisPreviewSheet(analysis: analysis) {
                     applyAnalysis(analysis)
-                    showAnalysisPreview = false
-                    pendingAnalysis = nil
+                    analysisManager.dismissPreview()
                 } onCancel: {
-                    showAnalysisPreview = false
-                    pendingAnalysis = nil
+                    analysisManager.dismissPreview()
                 }
             }
         }
@@ -319,19 +317,19 @@ struct AddProjectView: View {
     @ViewBuilder
     private var aiAnalysisButton: some View {
         if let apiKey = KeychainStore.loadAPIKey(for: .claude) {
-            switch aiAnalysisState {
+            switch analysisManager.state {
             case .idle, .failed:
                 Button {
-                    runAIAnalysis(apiKey: apiKey)
+                    analysisManager.runAnalysis(apiKey: apiKey, model: llmModel, repoPath: repoPath)
                 } label: {
                     Label("Auto-detect with AI", systemImage: "sparkles")
                 }
-                if case .failed(let message) = aiAnalysisState {
+                if case .failed(let message) = analysisManager.state {
                     Text(message)
                         .font(.caption)
                         .foregroundStyle(.red)
                     Button("Retry") {
-                        runAIAnalysis(apiKey: apiKey)
+                        analysisManager.runAnalysis(apiKey: apiKey, model: llmModel, repoPath: repoPath)
                     }
                     .font(.caption)
                 }
@@ -478,18 +476,13 @@ struct AddProjectView: View {
         selectedEnvFiles = Set(detectedEnvFiles)
 
         // Detect package.json scripts
-        let packageJsonPath = "\(repoPath)/package.json"
-        let catResult = try? await transport.execute(
-            ["cat", packageJsonPath],
-            in: repoPath
-        )
-        if let catResult, catResult.succeeded,
-           let data = catResult.stdout.data(using: .utf8),
+        let packageJsonURL = URL(fileURLWithPath: "\(repoPath)/package.json")
+        if let data = try? Data(contentsOf: packageJsonURL),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let scripts = json["scripts"] as? [String: String] {
 
             // Detect setup command
-            if scripts["install"] != nil || FileManager.default.fileExists(atPath: packageJsonPath) {
+            if scripts["install"] != nil || FileManager.default.fileExists(atPath: packageJsonURL.path) {
                 if FileManager.default.fileExists(atPath: "\(repoPath)/bun.lockb") {
                     setupCommands = ["bun install"]
                 } else if FileManager.default.fileExists(atPath: "\(repoPath)/pnpm-lock.yaml") {
@@ -547,65 +540,12 @@ struct AddProjectView: View {
         return nil
     }
 
-    private func runAIAnalysis(apiKey: String) {
-        aiAnalysisState = .gatheringContext
-        Task {
-            let provider = ClaudeProvider(apiKey: apiKey, model: llmModel)
-            let transport = LocalTransport()
-            let service = AnalysisService(provider: provider, transport: transport)
-
-            for await progress in await service.analyze(repoPath: repoPath) {
-                switch progress {
-                case .gatheringContext:
-                    aiAnalysisState = .gatheringContext
-                case .analyzing:
-                    aiAnalysisState = .analyzing
-                case .complete(let analysis):
-                    aiAnalysisState = .idle
-                    pendingAnalysis = analysis
-                    showAnalysisPreview = true
-                case .failed(let error):
-                    aiAnalysisState = .failed(message: describeError(error))
-                }
-            }
-        }
-    }
-
     private func applyAnalysis(_ analysis: ProjectAnalysis) {
-        // Env files
         detectedEnvFiles = analysis.envFilesToCopy
         selectedEnvFiles = Set(analysis.envFilesToCopy)
-
-        // Setup commands
         setupCommands = analysis.setupCommands
-
-        // Terminal start command
         terminalStartCommand = analysis.terminalStartCommand ?? ""
-
-        // Run configurations
-        runConfigurations = analysis.runConfigurations.map { rc in
-            EditableRunConfig(
-                name: rc.name,
-                command: rc.command,
-                portString: rc.port.map(String.init) ?? "",
-                autoStart: rc.autoStart
-            )
-        }
-    }
-
-    private func describeError(_ error: LLMError) -> String {
-        switch error {
-        case .noAPIKey:
-            "Invalid API key. Check Settings."
-        case .networkError(let detail):
-            "Network error: \(detail)"
-        case .rateLimited:
-            "Rate limited. Please try again in a moment."
-        case .invalidResponse(let detail):
-            "Unexpected response: \(detail)"
-        case .timeout:
-            "Request timed out. Try again."
-        }
+        runConfigurations = analysis.toEditableRunConfigs()
     }
 
     private func createBareProjectWithClaude() {
@@ -657,7 +597,11 @@ struct AddProjectView: View {
             worktree.project = project
 
             modelContext.insert(project)
-            try? modelContext.save()
+            do {
+                try modelContext.save()
+            } catch {
+                logger.error("Failed to save project with Claude setup: \(error.localizedDescription)")
+            }
 
             // 4. Pre-create terminal session with claude command
             let claudeCommand = #"claude "Analyze this repo and use the wteasy MCP configure_project tool to configure it. Determine appropriate setup commands, run configurations (dev servers with ports), env files to copy between worktrees, and terminal start command.""#
@@ -709,7 +653,11 @@ struct AddProjectView: View {
         project.profile = profile
 
         modelContext.insert(project)
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            logger.error("Failed to save new project '\(projectName)': \(error.localizedDescription)")
+        }
 
         // Write .wteasy/config.json and update .gitignore
         Task {
@@ -732,55 +680,34 @@ struct AddProjectView: View {
                     },
                 terminalStartCommand: startCmd
             )
-            try? await configService.writeConfig(config, forRepo: repoPath)
-            try? await configService.ensureGitignore(forRepo: repoPath)
+            do {
+                try await configService.writeConfig(config, forRepo: repoPath)
+                try await configService.ensureGitignore(forRepo: repoPath)
+            } catch {
+                logger.error("Failed to write config for '\(repoPath)': \(error.localizedDescription)")
+            }
         }
 
         dismiss()
     }
 
     private func browseWorktreeBasePath() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = true
-        panel.message = "Select worktree base directory"
-        if !repoPath.isEmpty {
-            panel.directoryURL = URL(fileURLWithPath: repoPath).deletingLastPathComponent()
-        }
-
-        if panel.runModal() == .OK, let url = panel.url {
-            worktreeBasePath = url.path
+        if let path = FileBrowseHelper.browseForDirectory(
+            message: "Select worktree base directory",
+            startingIn: repoPath
+        ) {
+            worktreeBasePath = path
         }
     }
 
     private func browseForEnvFiles() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.allowsMultipleSelection = true
-        panel.message = "Select environment files to copy to new worktrees"
-        panel.directoryURL = URL(fileURLWithPath: repoPath)
-
-        if panel.runModal() == .OK {
-            let repoURL = URL(fileURLWithPath: repoPath)
-            for url in panel.urls {
-                if let relative = url.path.hasPrefix(repoURL.path)
-                    ? String(url.path.dropFirst(repoURL.path.count + 1))
-                    : nil, !relative.isEmpty {
-                    if !detectedEnvFiles.contains(relative) {
-                        detectedEnvFiles.append(relative)
-                    }
-                    selectedEnvFiles.insert(relative)
-                } else {
-                    let name = url.lastPathComponent
-                    if !detectedEnvFiles.contains(name) {
-                        detectedEnvFiles.append(name)
-                    }
-                    selectedEnvFiles.insert(name)
-                }
-            }
+        let (detected, selected) = FileBrowseHelper.browseForEnvFiles(
+            repoPath: repoPath,
+            existing: detectedEnvFiles
+        )
+        detectedEnvFiles = detected
+        for file in selected {
+            selectedEnvFiles.insert(file)
         }
     }
 
@@ -791,18 +718,6 @@ struct AddProjectView: View {
         case .review: "Review"
         }
     }
-}
-
-struct DetectedScript {
-    let name: String
-    let command: String
-}
-
-private enum AIAnalysisState: Equatable {
-    case idle
-    case gatheringContext
-    case analyzing
-    case failed(message: String)
 }
 
 struct AIAnalysisPreviewSheet: View {

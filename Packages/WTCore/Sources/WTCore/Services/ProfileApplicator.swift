@@ -1,4 +1,7 @@
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "com.wteasy", category: "ProfileApplicator")
 
 public final class ProfileApplicator: Sendable {
     private let configService = ConfigService()
@@ -23,17 +26,29 @@ public final class ProfileApplicator: Sendable {
             let destination = URL(fileURLWithPath: worktreePath)
                 .appendingPathComponent(envFile)
 
-            guard fm.fileExists(atPath: source.path) else { continue }
+            guard fm.fileExists(atPath: source.path) else {
+                logger.warning("Env file not found at source, skipping: \(envFile)")
+                continue
+            }
 
             // Create intermediate directories if the env file is nested
             let destDir = destination.deletingLastPathComponent()
-            try? fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+            do {
+                try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+            } catch {
+                logger.error("Failed to create directory for env file '\(envFile)': \(error.localizedDescription)")
+                continue
+            }
 
             // Copy, overwriting if already present
-            if fm.fileExists(atPath: destination.path) {
-                try? fm.removeItem(at: destination)
+            do {
+                if fm.fileExists(atPath: destination.path) {
+                    try fm.removeItem(at: destination)
+                }
+                try fm.copyItem(at: source, to: destination)
+            } catch {
+                logger.error("Failed to copy env file '\(envFile)': \(error.localizedDescription)")
             }
-            try? fm.copyItem(at: source, to: destination)
         }
     }
 }

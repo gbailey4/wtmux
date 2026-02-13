@@ -39,7 +39,7 @@ WTEasy is a macOS SwiftUI app for managing git worktrees with embedded terminals
 - **WTCore** — SwiftData models (`Project`, `Worktree`, `ProjectProfile`, `RunConfiguration`) and `ProjectService`
 - **WTTransport** — `CommandTransport` protocol abstracting local vs SSH command execution; `LocalTransport` implementation
 - **WTGit** — `GitService` actor wrapping git CLI operations via `CommandTransport`
-- **WTProcess** — `ProcessManager` actor and `PortAllocator` for managing long-running dev server processes
+- **WTProcess** — `ProcessManager` actor for managing long-running dev server processes and port allocation
 - **WTTerminal** — `TerminalRepresentable` (NSViewRepresentable wrapping SwiftTerm's `LocalProcessTerminalView`) and `TerminalSessionManager`
 - **WTDiff** — `DiffParser` and `SideBySideDiffView` for unified diff visualization
 

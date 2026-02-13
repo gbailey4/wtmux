@@ -28,42 +28,30 @@ public enum EnvFileScanner {
         guard depth <= maxDepth else { return }
 
         let fm = FileManager.default
+        // Single directory listing that includes hidden files (needed for .env*)
         guard let entries = try? fm.contentsOfDirectory(
             at: dirURL,
             includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
+            options: []
         ) else { return }
 
-        // Also check hidden .env* files explicitly at this level
-        if let allEntries = try? fm.contentsOfDirectory(
-            at: dirURL,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: []
-        ) {
-            for entry in allEntries {
-                let name = entry.lastPathComponent
-                if isEnvFile(name) {
-                    var isDir: ObjCBool = false
-                    if fm.fileExists(atPath: entry.path, isDirectory: &isDir), !isDir.boolValue {
-                        let relativePath = entry.path.replacingOccurrences(
-                            of: rootURL.path + "/", with: ""
-                        )
-                        if !results.contains(relativePath) {
-                            results.append(relativePath)
-                        }
-                    }
-                }
-            }
-        }
-
-        // Recurse into non-skipped directories
         for entry in entries {
             let name = entry.lastPathComponent
-            guard !skipDirectories.contains(name) else { continue }
-
             var isDir: ObjCBool = false
-            if fm.fileExists(atPath: entry.path, isDirectory: &isDir), isDir.boolValue {
-                scanDirectory(entry, relativeTo: rootURL, depth: depth + 1, results: &results)
+            guard fm.fileExists(atPath: entry.path, isDirectory: &isDir) else { continue }
+
+            if isDir.boolValue {
+                // Recurse into non-skipped, non-hidden directories
+                if !skipDirectories.contains(name) && !name.hasPrefix(".") {
+                    scanDirectory(entry, relativeTo: rootURL, depth: depth + 1, results: &results)
+                }
+            } else if isEnvFile(name) {
+                let relativePath = entry.path.replacingOccurrences(
+                    of: rootURL.path + "/", with: ""
+                )
+                if !results.contains(relativePath) {
+                    results.append(relativePath)
+                }
             }
         }
     }

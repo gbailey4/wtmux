@@ -3,6 +3,9 @@ import SwiftData
 import WTCore
 import WTGit
 import WTTransport
+import os.log
+
+private let logger = Logger(subsystem: "com.wteasy", category: "CreateWorktreeView")
 
 struct CreateWorktreeView: View {
     let project: Project
@@ -111,7 +114,11 @@ struct CreateWorktreeView: View {
                 }
                 worktree.project = project
                 modelContext.insert(worktree)
-                try? modelContext.save()
+                do {
+                    try modelContext.save()
+                } catch {
+                    logger.error("Failed to save new worktree '\(branchName)': \(error.localizedDescription)")
+                }
 
                 await MainActor.run {
                     dismiss()

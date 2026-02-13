@@ -29,7 +29,7 @@ struct WorktreeDetailView: View {
 
     private var terminalTabs: [TerminalSession] {
         terminalSessionManager.sessions(forWorktree: worktreeId)
-            .filter { !$0.id.hasPrefix("runner-") }
+            .filter { !SessionID.isRunner($0.id) }
     }
 
     private var activeTabId: String? {
@@ -38,7 +38,7 @@ struct WorktreeDetailView: View {
 
     private var allTabSessions: [TerminalSession] {
         terminalSessionManager.sessions.values
-            .filter { !$0.worktreeId.isEmpty && !$0.id.hasPrefix("runner-") }
+            .filter { !$0.worktreeId.isEmpty && !SessionID.isRunner($0.id) }
             .sorted { $0.id < $1.id }
     }
 
@@ -282,7 +282,7 @@ struct WorktreeDetailView: View {
     private func launchRunners() {
         ensureRunnerSessions()
         for config in runConfigurations where !config.command.isEmpty {
-            let sessionId = "runner-\(worktreeId)-\(config.name)"
+            let sessionId = SessionID.runner(worktreeId: worktreeId, name: config.name)
             terminalSessionManager.startSession(id: sessionId)
         }
     }
@@ -298,7 +298,7 @@ struct WorktreeDetailView: View {
             return
         }
         for config in autoStartConfigs {
-            let sessionId = "runner-\(worktreeId)-\(config.name)"
+            let sessionId = SessionID.runner(worktreeId: worktreeId, name: config.name)
             ensureRunnerSession(config: config)
             terminalSessionManager.startSession(id: sessionId)
         }
@@ -306,7 +306,7 @@ struct WorktreeDetailView: View {
 
     private func launchSingleRunner(config: RunConfiguration) {
         guard !config.command.isEmpty else { return }
-        let sessionId = "runner-\(worktreeId)-\(config.name)"
+        let sessionId = SessionID.runner(worktreeId: worktreeId, name: config.name)
         ensureRunnerSession(config: config)
         terminalSessionManager.startSession(id: sessionId)
     }
@@ -320,7 +320,7 @@ struct WorktreeDetailView: View {
 
     /// Creates a single idle runner session for a config if one doesn't already exist.
     private func ensureRunnerSession(config: RunConfiguration) {
-        let sessionId = "runner-\(worktreeId)-\(config.name)"
+        let sessionId = SessionID.runner(worktreeId: worktreeId, name: config.name)
         guard terminalSessionManager.sessions[sessionId] == nil else { return }
         let session = terminalSessionManager.createRunnerSession(
             id: sessionId,

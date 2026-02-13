@@ -1,6 +1,12 @@
 import Foundation
 import SwiftData
+import os.log
 
+private let logger = Logger(subsystem: "com.wteasy", category: "ProjectService")
+
+// @unchecked Sendable: ProjectService is always created and used on @MainActor
+// (via SwiftUI views with @Environment(\.modelContext)). @Observable does not
+// support actor isolation directly, so we mark Sendable compliance manually.
 @Observable
 public final class ProjectService: @unchecked Sendable {
     private let modelContext: ModelContext
@@ -16,11 +22,19 @@ public final class ProjectService: @unchecked Sendable {
 
     public func addProject(_ project: Project) {
         modelContext.insert(project)
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            logger.error("Failed to save after adding project '\(project.name)': \(error.localizedDescription)")
+        }
     }
 
     public func deleteProject(_ project: Project) {
         modelContext.delete(project)
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            logger.error("Failed to save after deleting project '\(project.name)': \(error.localizedDescription)")
+        }
     }
 }

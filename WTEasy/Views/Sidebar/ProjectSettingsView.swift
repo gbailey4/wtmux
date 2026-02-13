@@ -1,7 +1,11 @@
+import AppKit
 import SwiftUI
 import WTCore
 import WTLLM
 import WTTransport
+import os.log
+
+private let logger = Logger(subsystem: "com.wteasy", category: "ProjectSettingsView")
 
 struct ProjectSettingsView: View {
     @Bindable var project: Project
@@ -24,9 +28,7 @@ struct ProjectSettingsView: View {
 
     // AI analysis
     @AppStorage("llmModel") private var llmModel = "claude-sonnet-4-5-20250929"
-    @State private var aiAnalysisState: ProjectAIAnalysisState = .idle
-    @State private var pendingAnalysis: ProjectAnalysis?
-    @State private var showAnalysisPreview = false
+    @State private var analysisManager = AIAnalysisManager()
 
     init(project: Project) {
         self.project = project
@@ -274,15 +276,13 @@ struct ProjectSettingsView: View {
                 }
             }
         }
-        .sheet(isPresented: $showAnalysisPreview) {
-            if let analysis = pendingAnalysis {
+        .sheet(isPresented: $analysisManager.showAnalysisPreview) {
+            if let analysis = analysisManager.pendingAnalysis {
                 AIAnalysisPreviewSheet(analysis: analysis) {
                     applyAnalysis(analysis)
-                    showAnalysisPreview = false
-                    pendingAnalysis = nil
+                    analysisManager.dismissPreview()
                 } onCancel: {
-                    showAnalysisPreview = false
-                    pendingAnalysis = nil
+                    analysisManager.dismissPreview()
                 }
             }
         }
@@ -304,56 +304,29 @@ struct ProjectSettingsView: View {
     }
 
     private func browseWorktreeBasePath() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = true
-        panel.message = "Select worktree base directory"
-        if !repoPath.isEmpty {
-            panel.directoryURL = URL(fileURLWithPath: repoPath).deletingLastPathComponent()
-        }
-
-        if panel.runModal() == .OK, let url = panel.url {
-            worktreeBasePath = url.path
+        if let path = FileBrowseHelper.browseForDirectory(
+            message: "Select worktree base directory",
+            startingIn: repoPath
+        ) {
+            worktreeBasePath = path
         }
     }
 
     private func browseForEnvFiles() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.allowsMultipleSelection = true
-        panel.message = "Select environment files to copy to new worktrees"
-        panel.directoryURL = URL(fileURLWithPath: repoPath)
-
-        if panel.runModal() == .OK {
-            let repoURL = URL(fileURLWithPath: repoPath)
-            for url in panel.urls {
-                // Store as relative path from repo root when possible
-                if let relative = url.path.hasPrefix(repoURL.path)
-                    ? String(url.path.dropFirst(repoURL.path.count + 1))
-                    : nil, !relative.isEmpty {
-                    if !envFilesToCopy.contains(relative) {
-                        envFilesToCopy.append(relative)
-                    }
-                } else {
-                    let name = url.lastPathComponent
-                    if !envFilesToCopy.contains(name) {
-                        envFilesToCopy.append(name)
-                    }
-                }
-            }
-        }
+        let (detected, _) = FileBrowseHelper.browseForEnvFiles(
+            repoPath: repoPath,
+            existing: envFilesToCopy
+        )
+        envFilesToCopy = detected
     }
 
     @ViewBuilder
     private var reanalyzeButton: some View {
         if let apiKey = KeychainStore.loadAPIKey(for: .claude) {
-            switch aiAnalysisState {
+            switch analysisManager.state {
             case .idle:
                 Button {
-                    runAIAnalysis(apiKey: apiKey)
+                    analysisManager.runAnalysis(apiKey: apiKey, model: llmModel, repoPath: repoPath)
                 } label: {
                     Label("Re-analyze with AI", systemImage: "sparkles")
                 }
@@ -377,7 +350,7 @@ struct ProjectSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.red)
                     Button {
-                        runAIAnalysis(apiKey: apiKey)
+                        analysisManager.runAnalysis(apiKey: apiKey, model: llmModel, repoPath: repoPath)
                     } label: {
                         Label("Retry", systemImage: "sparkles")
                     }
@@ -398,57 +371,11 @@ struct ProjectSettingsView: View {
         }
     }
 
-    private func runAIAnalysis(apiKey: String) {
-        aiAnalysisState = .gatheringContext
-        Task {
-            let provider = ClaudeProvider(apiKey: apiKey, model: llmModel)
-            let transport = LocalTransport()
-            let service = AnalysisService(provider: provider, transport: transport)
-
-            for await progress in await service.analyze(repoPath: repoPath) {
-                switch progress {
-                case .gatheringContext:
-                    aiAnalysisState = .gatheringContext
-                case .analyzing:
-                    aiAnalysisState = .analyzing
-                case .complete(let analysis):
-                    aiAnalysisState = .idle
-                    pendingAnalysis = analysis
-                    showAnalysisPreview = true
-                case .failed(let error):
-                    aiAnalysisState = .failed(message: describeError(error))
-                }
-            }
-        }
-    }
-
     private func applyAnalysis(_ analysis: ProjectAnalysis) {
         envFilesToCopy = analysis.envFilesToCopy
         setupCommands = analysis.setupCommands
         terminalStartCommand = analysis.terminalStartCommand ?? ""
-        runConfigurations = analysis.runConfigurations.map { rc in
-            EditableRunConfig(
-                name: rc.name,
-                command: rc.command,
-                portString: rc.port.map(String.init) ?? "",
-                autoStart: rc.autoStart
-            )
-        }
-    }
-
-    private func describeError(_ error: LLMError) -> String {
-        switch error {
-        case .noAPIKey:
-            "Invalid API key. Check Settings."
-        case .networkError(let detail):
-            "Network error: \(detail)"
-        case .rateLimited:
-            "Rate limited. Try again shortly."
-        case .invalidResponse(let detail):
-            "Unexpected response: \(detail)"
-        case .timeout:
-            "Request timed out. Try again."
-        }
+        runConfigurations = analysis.toEditableRunConfigs()
     }
 
     private func save() {
@@ -519,15 +446,12 @@ struct ProjectSettingsView: View {
                     },
                 terminalStartCommand: startCmd
             )
-            try? await configService.writeConfig(config, forRepo: repoPath)
-            try? await configService.ensureGitignore(forRepo: repoPath)
+            do {
+                try await configService.writeConfig(config, forRepo: repoPath)
+                try await configService.ensureGitignore(forRepo: repoPath)
+            } catch {
+                logger.error("Failed to write config for '\(repoPath)': \(error.localizedDescription)")
+            }
         }
     }
-}
-
-private enum ProjectAIAnalysisState: Equatable {
-    case idle
-    case gatheringContext
-    case analyzing
-    case failed(message: String)
 }

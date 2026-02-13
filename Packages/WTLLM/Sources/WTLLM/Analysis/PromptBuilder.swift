@@ -99,7 +99,7 @@ public enum PromptBuilder {
             "required": ["envFilesToCopy", "setupCommands", "runConfigurations"]
         ]
 
-        // swiftlint:disable:next force_try
+        // Safe to force-try: the dictionary above is a hardcoded JSON-compatible literal.
         let schemaData = try! JSONSerialization.data(withJSONObject: schema)
 
         return ToolDefinition(

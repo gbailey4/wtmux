@@ -4,15 +4,40 @@ import WTTransport
 public actor GitService {
     private let transport: CommandTransport
     private let repoPath: String
+    private let gitPath: String
 
-    public init(transport: CommandTransport, repoPath: String) {
+    /// Creates a `GitService`.
+    /// - Parameters:
+    ///   - transport: The command transport to use.
+    ///   - repoPath: Path to the git repository.
+    ///   - gitPath: Explicit path to the git binary. When `nil`, the
+    ///     initializer resolves it via common locations.
+    public init(transport: CommandTransport, repoPath: String, gitPath: String? = nil) {
         self.transport = transport
         self.repoPath = repoPath
+        self.gitPath = gitPath ?? Self.resolveGitPath()
+    }
+
+    /// Resolves the git binary path by checking common install locations.
+    private static func resolveGitPath() -> String {
+        let candidates = [
+            "/opt/homebrew/bin/git",  // Apple Silicon Homebrew
+            "/usr/local/bin/git",     // Intel Homebrew / manual installs
+            "/usr/bin/git",           // Xcode / CLT default
+        ]
+        for candidate in candidates {
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+        // Fall back to /usr/bin/git (Xcode CLT shim) which will still
+        // produce a useful error if git isn't installed.
+        return "/usr/bin/git"
     }
 
     public func currentBranch() async throws -> String {
         let result = try await transport.execute(
-            ["/usr/bin/git", "rev-parse", "--abbrev-ref", "HEAD"],
+            [gitPath, "rev-parse", "--abbrev-ref", "HEAD"],
             in: repoPath
         )
         guard result.succeeded else {
@@ -23,7 +48,7 @@ public actor GitService {
 
     public func branches() async throws -> [String] {
         let result = try await transport.execute(
-            ["/usr/bin/git", "branch", "--format=%(refname:short)"],
+            [gitPath, "branch", "--format=%(refname:short)"],
             in: repoPath
         )
         guard result.succeeded else {
@@ -36,7 +61,7 @@ public actor GitService {
 
     public func defaultBranch() async throws -> String {
         let result = try await transport.execute(
-            ["/usr/bin/git", "symbolic-ref", "refs/remotes/origin/HEAD", "--short"],
+            [gitPath, "symbolic-ref", "refs/remotes/origin/HEAD", "--short"],
             in: repoPath
         )
         if result.succeeded {
@@ -52,7 +77,7 @@ public actor GitService {
 
     public func worktreeList() async throws -> [GitWorktreeInfo] {
         let result = try await transport.execute(
-            ["/usr/bin/git", "worktree", "list", "--porcelain"],
+            [gitPath, "worktree", "list", "--porcelain"],
             in: repoPath
         )
         guard result.succeeded else {
@@ -63,7 +88,7 @@ public actor GitService {
 
     public func worktreeAdd(path: String, branch: String, baseBranch: String) async throws {
         let result = try await transport.execute(
-            ["/usr/bin/git", "worktree", "add", "-b", branch, path, baseBranch],
+            [gitPath, "worktree", "add", "-b", branch, path, baseBranch],
             in: repoPath
         )
         guard result.succeeded else {
@@ -72,7 +97,7 @@ public actor GitService {
     }
 
     public func worktreeRemove(path: String, force: Bool = false) async throws {
-        var args = ["/usr/bin/git", "worktree", "remove", path]
+        var args = [gitPath, "worktree", "remove", path]
         if force { args.insert("--force", at: 3) }
         let result = try await transport.execute(args, in: repoPath)
         guard result.succeeded else {
@@ -82,7 +107,7 @@ public actor GitService {
 
     public func diff(baseBranch: String, branch: String) async throws -> String {
         let result = try await transport.execute(
-            ["/usr/bin/git", "diff", "\(baseBranch)...\(branch)"],
+            [gitPath, "diff", "\(baseBranch)...\(branch)"],
             in: repoPath
         )
         guard result.succeeded else {
@@ -94,7 +119,7 @@ public actor GitService {
     /// Returns the list of changed files in the working directory (staged + unstaged + untracked).
     public func status() async throws -> [GitFileStatus] {
         let result = try await transport.execute(
-            ["/usr/bin/git", "status", "--porcelain=v1"],
+            [gitPath, "status", "--porcelain=v1"],
             in: repoPath
         )
         guard result.succeeded else {
@@ -106,7 +131,7 @@ public actor GitService {
     /// Returns a unified diff of all working changes (staged + unstaged) against HEAD.
     public func workingDiff() async throws -> String {
         let result = try await transport.execute(
-            ["/usr/bin/git", "diff", "HEAD"],
+            [gitPath, "diff", "HEAD"],
             in: repoPath
         )
         guard result.succeeded else {
@@ -118,7 +143,7 @@ public actor GitService {
     /// Returns commits on the current branch since it diverged from `baseBranch`, newest-first.
     public func log(since baseBranch: String) async throws -> [GitCommitInfo] {
         let result = try await transport.execute(
-            ["/usr/bin/git", "log", "\(baseBranch)..HEAD", "--format=%H%n%h%n%an%n%aI%n%s"],
+            [gitPath, "log", "\(baseBranch)..HEAD", "--format=%H%n%h%n%an%n%aI%n%s"],
             in: repoPath
         )
         guard result.succeeded else {
@@ -130,7 +155,7 @@ public actor GitService {
     /// Returns the diff for a single commit (patch only, no commit header).
     public func commitDiff(hash: String) async throws -> String {
         let result = try await transport.execute(
-            ["/usr/bin/git", "show", hash, "--format="],
+            [gitPath, "show", hash, "--format="],
             in: repoPath
         )
         guard result.succeeded else {
@@ -142,7 +167,7 @@ public actor GitService {
     /// Returns the list of files changed in a single commit.
     public func commitFiles(hash: String) async throws -> [GitFileStatus] {
         let result = try await transport.execute(
-            ["/usr/bin/git", "diff-tree", "--no-commit-id", "-r", "--name-status", hash],
+            [gitPath, "diff-tree", "--no-commit-id", "-r", "--name-status", hash],
             in: repoPath
         )
         guard result.succeeded else {
@@ -151,9 +176,9 @@ public actor GitService {
         return parseDiffTree(result.stdout)
     }
 
-    // MARK: - Parsers
+    // MARK: - Parsers (internal for testability)
 
-    private func parseStatus(_ output: String) -> [GitFileStatus] {
+    func parseStatus(_ output: String) -> [GitFileStatus] {
         guard !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
         var files: [GitFileStatus] = []
         for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
@@ -179,7 +204,7 @@ public actor GitService {
         return files
     }
 
-    private func parseLog(_ output: String) -> [GitCommitInfo] {
+    func parseLog(_ output: String) -> [GitCommitInfo] {
         guard !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
         let lines = output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var commits: [GitCommitInfo] = []
@@ -207,7 +232,7 @@ public actor GitService {
         return commits
     }
 
-    private func parseDiffTree(_ output: String) -> [GitFileStatus] {
+    func parseDiffTree(_ output: String) -> [GitFileStatus] {
         guard !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
         var files: [GitFileStatus] = []
         for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
@@ -223,7 +248,7 @@ public actor GitService {
         return files
     }
 
-    private func parseWorktreeList(_ output: String) -> [GitWorktreeInfo] {
+    func parseWorktreeList(_ output: String) -> [GitWorktreeInfo] {
         var worktrees: [GitWorktreeInfo] = []
         var currentPath: String?
         var currentBranch: String?

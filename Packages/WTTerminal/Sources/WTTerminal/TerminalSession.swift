@@ -8,7 +8,39 @@ public enum SessionState: Sendable {
     case failed
 }
 
-public final class TerminalSession: Identifiable, @unchecked Sendable {
+// MARK: - Session ID Conventions
+
+/// Constants and helpers for session ID construction.
+/// Session IDs encode the kind, worktree, and purpose of a terminal.
+public enum SessionID {
+    /// Prefix for interactive terminal tab sessions.
+    public static let tabPrefix = "tab-"
+    /// Prefix for runner (dev server / command) sessions.
+    public static let runnerPrefix = "runner-"
+
+    /// Build an ID for an interactive tab.
+    public static func tab(worktreeId: String, index: Int) -> String {
+        "\(tabPrefix)\(worktreeId)-\(index)"
+    }
+
+    /// Build an ID for a runner session.
+    public static func runner(worktreeId: String, name: String) -> String {
+        "\(runnerPrefix)\(worktreeId)-\(name)"
+    }
+
+    /// Build an ID for a setup runner session.
+    public static func setup(worktreeId: String) -> String {
+        "\(runnerPrefix)\(worktreeId)-setup"
+    }
+
+    /// Whether the given session ID represents a runner session.
+    public static func isRunner(_ id: String) -> Bool {
+        id.hasPrefix(runnerPrefix)
+    }
+}
+
+@MainActor
+public final class TerminalSession: Identifiable {
     public let id: String
     public let title: String
     public let worktreeId: String
@@ -38,7 +70,7 @@ public final class TerminalSession: Identifiable, @unchecked Sendable {
     /// Parameters: session ID, exit code.
     public var onProcessExit: (@MainActor (String, Int32?) -> Void)?
 
-    nonisolated(unsafe) public var terminalView: DeferredStartTerminalView?
+    public var terminalView: DeferredStartTerminalView?
 
     public init(
         id: String,

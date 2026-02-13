@@ -1,5 +1,8 @@
 import Foundation
 import SwiftData
+import os.log
+
+private let logger = Logger(subsystem: "com.wteasy", category: "ProjectImportService")
 
 /// Creates or updates a SwiftData `Project` from a `ProjectConfig` and repo path.
 @MainActor
@@ -82,6 +85,10 @@ public struct ProjectImportService {
             modelContext.insert(project)
         }
 
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            logger.error("Failed to save imported project at '\(repoPath)': \(error.localizedDescription)")
+        }
     }
 }

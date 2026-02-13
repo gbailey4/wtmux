@@ -22,11 +22,15 @@ public final class LocalTransport: CommandTransport {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
+        // Read pipe data BEFORE waitUntilExit to avoid deadlock when the
+        // subprocess output exceeds the pipe buffer (~64 KB). If we waited
+        // first, the child would block writing and we'd block reading — deadlock.
         try process.run()
-        process.waitUntilExit()
 
         let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+
+        process.waitUntilExit()
 
         return CommandResult(
             exitCode: process.terminationStatus,

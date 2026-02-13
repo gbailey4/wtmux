@@ -5,6 +5,9 @@ import WTCore
 import WTGit
 import WTTerminal
 import WTTransport
+import os.log
+
+private let logger = Logger(subsystem: "com.wteasy", category: "SidebarView")
 
 struct SidebarView: View {
     let projects: [Project]
@@ -244,14 +247,22 @@ struct SidebarView: View {
                 selectedWorktreeID = nil
             }
             modelContext.delete(worktree)
-            try? modelContext.save()
+            do {
+                try modelContext.save()
+            } catch {
+                logger.error("Failed to save after deleting worktree '\(worktree.branchName)': \(error.localizedDescription)")
+            }
             worktreeToDelete = nil
         }
     }
 
     private func deleteProject(_ project: Project) {
         modelContext.delete(project)
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            logger.error("Failed to save after deleting project '\(project.name)': \(error.localizedDescription)")
+        }
     }
 }
 
