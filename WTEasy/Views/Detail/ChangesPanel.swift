@@ -65,7 +65,7 @@ struct ChangesPanel: View {
                 outlineView
             }
         }
-        .task(id: worktree.branchName) {
+        .task(id: worktree.path) {
             await loadAllChanges()
         }
         .onChange(of: activeDiffFile?.id) { _, newValue in

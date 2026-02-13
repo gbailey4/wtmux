@@ -1,10 +1,16 @@
+import AppKit
 import SwiftUI
 import SwiftData
 import WTCore
 import WTGit
+import WTLLM
+import WTTerminal
 import WTTransport
 
 struct AddProjectView: View {
+    @Binding var selectedWorktreeID: String?
+    let terminalSessionManager: TerminalSessionManager
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
@@ -28,6 +34,16 @@ struct AddProjectView: View {
 
     @State private var errorMessage: String?
     @State private var isLoading = false
+
+    // AI analysis
+    @AppStorage("llmModel") private var llmModel = "claude-sonnet-4-5-20250929"
+    @State private var aiAnalysisState: AIAnalysisState = .idle
+    @State private var pendingAnalysis: ProjectAnalysis?
+    @State private var showAnalysisPreview = false
+
+    // Configure with Claude
+    @State private var showFirstWorktreeAlert = false
+    @State private var firstWorktreeBranch = ""
 
     enum InterviewStep: CaseIterable {
         case selectRepo
@@ -102,6 +118,15 @@ struct AddProjectView: View {
             }
             .padding()
         }
+        .alert("Create First Worktree", isPresented: $showFirstWorktreeAlert) {
+            TextField("Branch name", text: $firstWorktreeBranch)
+            Button("Create") {
+                createBareProjectWithClaude()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Enter a branch name for your first worktree. Claude will auto-configure the project in the terminal.")
+        }
         .frame(width: 600, height: 500)
     }
 
@@ -160,6 +185,32 @@ struct AddProjectView: View {
     @ViewBuilder
     private var configureProfileStep: some View {
         Form {
+            Section {
+                Button {
+                    firstWorktreeBranch = ""
+                    showFirstWorktreeAlert = true
+                } label: {
+                    HStack {
+                        Image(systemName: "terminal")
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Configure with Claude")
+                                .fontWeight(.medium)
+                            Text("Create a worktree and let Claude CLI auto-configure the project")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+
+            Section {
+                aiAnalysisButton
+            }
+
             Section("Environment Files to Copy") {
                 ForEach(detectedEnvFiles, id: \.self) { file in
                     Toggle(file, isOn: Binding(
@@ -251,6 +302,67 @@ struct AddProjectView: View {
         }
         .formStyle(.grouped)
         .padding()
+        .sheet(isPresented: $showAnalysisPreview) {
+            if let analysis = pendingAnalysis {
+                AIAnalysisPreviewSheet(analysis: analysis) {
+                    applyAnalysis(analysis)
+                    showAnalysisPreview = false
+                    pendingAnalysis = nil
+                } onCancel: {
+                    showAnalysisPreview = false
+                    pendingAnalysis = nil
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var aiAnalysisButton: some View {
+        if let apiKey = KeychainStore.loadAPIKey(for: .claude) {
+            switch aiAnalysisState {
+            case .idle, .failed:
+                Button {
+                    runAIAnalysis(apiKey: apiKey)
+                } label: {
+                    Label("Auto-detect with AI", systemImage: "sparkles")
+                }
+                if case .failed(let message) = aiAnalysisState {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                    Button("Retry") {
+                        runAIAnalysis(apiKey: apiKey)
+                    }
+                    .font(.caption)
+                }
+            case .gatheringContext:
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Gathering project files...")
+                        .foregroundStyle(.secondary)
+                }
+            case .analyzing:
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Analyzing project...")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } else {
+            HStack {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(.secondary)
+                Text("Configure an AI provider in Settings to auto-detect project configuration")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                SettingsLink {
+                    Text("Open Settings")
+                        .font(.caption)
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -435,6 +547,132 @@ struct AddProjectView: View {
         return nil
     }
 
+    private func runAIAnalysis(apiKey: String) {
+        aiAnalysisState = .gatheringContext
+        Task {
+            let provider = ClaudeProvider(apiKey: apiKey, model: llmModel)
+            let transport = LocalTransport()
+            let service = AnalysisService(provider: provider, transport: transport)
+
+            for await progress in await service.analyze(repoPath: repoPath) {
+                switch progress {
+                case .gatheringContext:
+                    aiAnalysisState = .gatheringContext
+                case .analyzing:
+                    aiAnalysisState = .analyzing
+                case .complete(let analysis):
+                    aiAnalysisState = .idle
+                    pendingAnalysis = analysis
+                    showAnalysisPreview = true
+                case .failed(let error):
+                    aiAnalysisState = .failed(message: describeError(error))
+                }
+            }
+        }
+    }
+
+    private func applyAnalysis(_ analysis: ProjectAnalysis) {
+        // Env files
+        detectedEnvFiles = analysis.envFilesToCopy
+        selectedEnvFiles = Set(analysis.envFilesToCopy)
+
+        // Setup commands
+        setupCommands = analysis.setupCommands
+
+        // Terminal start command
+        terminalStartCommand = analysis.terminalStartCommand ?? ""
+
+        // Run configurations
+        runConfigurations = analysis.runConfigurations.map { rc in
+            EditableRunConfig(
+                name: rc.name,
+                command: rc.command,
+                portString: rc.port.map(String.init) ?? "",
+                autoStart: rc.autoStart
+            )
+        }
+    }
+
+    private func describeError(_ error: LLMError) -> String {
+        switch error {
+        case .noAPIKey:
+            "Invalid API key. Check Settings."
+        case .networkError(let detail):
+            "Network error: \(detail)"
+        case .rateLimited:
+            "Rate limited. Please try again in a moment."
+        case .invalidResponse(let detail):
+            "Unexpected response: \(detail)"
+        case .timeout:
+            "Request timed out. Try again."
+        }
+    }
+
+    private func createBareProjectWithClaude() {
+        let branchName = firstWorktreeBranch.trimmingCharacters(in: .whitespaces)
+        guard !branchName.isEmpty else { return }
+
+        errorMessage = nil
+
+        Task {
+            // 1. Create git worktree
+            let transport = LocalTransport()
+            let git = GitService(transport: transport, repoPath: repoPath)
+            let worktreePath = "\(worktreeBasePath)/\(branchName)"
+
+            do {
+                try await git.worktreeAdd(
+                    path: worktreePath,
+                    branch: branchName,
+                    baseBranch: defaultBranch
+                )
+            } catch {
+                errorMessage = "Failed to create worktree: \(error.localizedDescription)"
+                return
+            }
+
+            // 2. Create bare project with empty profile
+            let project = Project(
+                name: projectName,
+                repoPath: repoPath,
+                defaultBranch: defaultBranch,
+                worktreeBasePath: worktreeBasePath
+            )
+            if isRemote {
+                project.sshHost = sshHost
+                project.sshUser = sshUser
+                project.sshPort = Int(sshPort) ?? 22
+            }
+            let profile = ProjectProfile()
+            profile.project = project
+            project.profile = profile
+
+            // 3. Create worktree model
+            let worktree = Worktree(
+                branchName: branchName,
+                path: worktreePath,
+                baseBranch: defaultBranch,
+                status: .ready
+            )
+            worktree.project = project
+
+            modelContext.insert(project)
+            try? modelContext.save()
+
+            // 4. Pre-create terminal session with claude command
+            let claudeCommand = #"claude "Analyze this repo and use the wteasy MCP configure_project tool to configure it. Determine appropriate setup commands, run configurations (dev servers with ports), env files to copy between worktrees, and terminal start command.""#
+            _ = terminalSessionManager.createTab(
+                forWorktree: worktreePath,
+                workingDirectory: worktreePath,
+                initialCommand: claudeCommand
+            )
+
+            // 5. Navigate to the new worktree and dismiss
+            selectedWorktreeID = worktreePath
+            dismiss()
+        }
+    }
+
     private func createProject() {
         let project = Project(
             name: projectName,
@@ -558,4 +796,109 @@ struct AddProjectView: View {
 struct DetectedScript {
     let name: String
     let command: String
+}
+
+private enum AIAnalysisState: Equatable {
+    case idle
+    case gatheringContext
+    case analyzing
+    case failed(message: String)
+}
+
+struct AIAnalysisPreviewSheet: View {
+    let analysis: ProjectAnalysis
+    let onApply: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("AI Analysis Results")
+                .font(.headline)
+                .padding()
+
+            if let projectType = analysis.projectType {
+                Text("Detected: \(projectType)")
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 8)
+            }
+
+            Divider()
+
+            Form {
+                if !analysis.envFilesToCopy.isEmpty {
+                    Section("Environment Files") {
+                        ForEach(analysis.envFilesToCopy, id: \.self) { file in
+                            Text(file)
+                                .font(.system(.body, design: .monospaced))
+                        }
+                    }
+                }
+
+                if !analysis.setupCommands.isEmpty {
+                    Section("Setup Commands") {
+                        ForEach(analysis.setupCommands, id: \.self) { cmd in
+                            Text(cmd)
+                                .font(.system(.body, design: .monospaced))
+                        }
+                    }
+                }
+
+                if let startCmd = analysis.terminalStartCommand {
+                    Section("Terminal Start Command") {
+                        Text(startCmd)
+                            .font(.system(.body, design: .monospaced))
+                    }
+                }
+
+                if !analysis.runConfigurations.isEmpty {
+                    Section("Run Configurations") {
+                        ForEach(analysis.runConfigurations) { rc in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(rc.name)
+                                    .font(.headline)
+                                Text(rc.command)
+                                    .font(.system(.body, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                HStack {
+                                    if let port = rc.port {
+                                        Text("Port: \(port)")
+                                            .font(.caption)
+                                    }
+                                    if rc.autoStart {
+                                        Text("Auto-start")
+                                            .font(.caption)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(.blue.opacity(0.15))
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let notes = analysis.notes {
+                    Section("Notes") {
+                        Text(notes)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .formStyle(.grouped)
+
+            Divider()
+
+            HStack {
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Apply", action: onApply)
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding()
+        }
+        .frame(width: 450, height: 500)
+    }
 }

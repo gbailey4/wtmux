@@ -14,6 +14,7 @@ struct ContentView: View {
     @State private var changedFileCount: Int = 0
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var terminalSessionManager = TerminalSessionManager()
+    @State private var claudeStatusManager = ClaudeStatusManager()
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -21,7 +22,8 @@ struct ContentView: View {
                 projects: projects,
                 selectedWorktreeID: $selectedWorktreeID,
                 showingAddProject: $showingAddProject,
-                terminalSessionManager: terminalSessionManager
+                terminalSessionManager: terminalSessionManager,
+                claudeStatusManager: claudeStatusManager
             )
             .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 320)
         } detail: {
@@ -65,13 +67,49 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showingAddProject) {
-            AddProjectView()
+            AddProjectView(
+                selectedWorktreeID: $selectedWorktreeID,
+                terminalSessionManager: terminalSessionManager
+            )
+        }
+        .onOpenURL { url in
+            handleImportURL(url)
+        }
+        .task { registerWorktreePaths() }
+        .onChange(of: projects) { registerWorktreePaths() }
+        .onChange(of: totalWorktreeCount) { registerWorktreePaths() }
+    }
+
+    private var totalWorktreeCount: Int {
+        projects.reduce(0) { $0 + $1.worktrees.count }
+    }
+
+    private func registerWorktreePaths() {
+        let paths = Set(projects.flatMap { $0.worktrees.map(\.path) })
+        claudeStatusManager.registerWorktreePaths(paths)
+    }
+
+    private func handleImportURL(_ url: URL) {
+        guard url.scheme == "wteasy",
+              url.host == "import-project",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let pathItem = components.queryItems?.first(where: { $0.name == "path" }),
+              let repoPath = pathItem.value,
+              !repoPath.isEmpty else {
+            return
+        }
+
+        Task {
+            let configService = ConfigService()
+            let config = await configService.readConfig(forRepo: repoPath) ?? ProjectConfig()
+            let importService = ProjectImportService()
+            importService.importProject(repoPath: repoPath, config: config, in: modelContext)
         }
     }
 
     private func findWorktree(id: String) -> Worktree? {
         for project in projects {
-            if let wt = project.worktrees.first(where: { $0.branchName == id }) {
+            if let wt = project.worktrees.first(where: { $0.path == id }) {
                 return wt
             }
         }

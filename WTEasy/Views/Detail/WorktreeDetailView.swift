@@ -25,7 +25,7 @@ struct WorktreeDetailView: View {
         TerminalThemes.theme(forId: terminalThemeId)
     }
 
-    private var worktreeId: String { worktree.branchName }
+    private var worktreeId: String { worktree.path }
 
     private var terminalTabs: [TerminalSession] {
         terminalSessionManager.sessions(forWorktree: worktreeId)
@@ -250,7 +250,7 @@ struct WorktreeDetailView: View {
         guard let project = worktree.project else { return nil }
         let _ = terminalSessionManager.runnerStateVersion
         let siblingIds = project.worktrees
-            .map(\.branchName)
+            .map(\.path)
             .filter { $0 != worktreeId }
         for siblingId in siblingIds {
             let runners = terminalSessionManager.runnerSessions(forWorktree: siblingId)
@@ -270,11 +270,11 @@ struct WorktreeDetailView: View {
     private func stopConflictingAndStartRunners() {
         guard let project = worktree.project else { return }
         // Stop runners on all other worktrees in this project
-        for sibling in project.worktrees where sibling.branchName != worktreeId {
-            for session in terminalSessionManager.runnerSessions(forWorktree: sibling.branchName) {
+        for sibling in project.worktrees where sibling.path != worktreeId {
+            for session in terminalSessionManager.runnerSessions(forWorktree: sibling.path) {
                 terminalSessionManager.stopSession(id: session.id)
             }
-            terminalSessionManager.removeRunnerSessions(forWorktree: sibling.branchName)
+            terminalSessionManager.removeRunnerSessions(forWorktree: sibling.path)
         }
         launchRunners()
     }
@@ -374,6 +374,22 @@ struct WorktreeDetailView: View {
     @ViewBuilder
     private var terminalTabBar: some View {
         HStack(spacing: 0) {
+            if let projectName = worktree.project?.name {
+                HStack(spacing: 4) {
+                    Text(projectName)
+                        .foregroundStyle(.tertiary)
+                    Text("/")
+                        .foregroundStyle(.quaternary)
+                    Text(worktree.branchName)
+                        .foregroundStyle(.secondary)
+                }
+                .font(.caption)
+                .padding(.horizontal, 10)
+
+                Divider()
+                    .frame(height: 14)
+            }
+
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
                     ForEach(terminalTabs) { session in

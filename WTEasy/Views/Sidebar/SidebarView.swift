@@ -34,14 +34,14 @@ struct SidebarView: View {
                     ForEach(project.worktrees.sorted(by: { $0.createdAt < $1.createdAt })) { worktree in
                         WorktreeRow(
                             worktree: worktree,
-                            isRunning: runningWorktreeIds.contains(worktree.branchName),
+                            isRunning: runningWorktreeIds.contains(worktree.path),
                             claudeStatus: claudeStatusManager.status(forWorktreePath: worktree.path),
                             onDelete: {
                                 worktreeToDelete = worktree
                                 showDeleteConfirmation = true
                             }
                         )
-                            .tag(worktree.branchName)
+                            .tag(worktree.path)
                             .contextMenu {
                                 worktreeContextMenu(worktree: worktree)
                             }
@@ -115,7 +115,7 @@ struct SidebarView: View {
 
     @ViewBuilder
     private func worktreeContextMenu(worktree: Worktree) -> some View {
-        let isRunning = runningWorktreeIds.contains(worktree.branchName)
+        let isRunning = runningWorktreeIds.contains(worktree.path)
 
         if hasRunConfigurations(for: worktree) {
             if isRunning {
@@ -126,7 +126,7 @@ struct SidebarView: View {
                 }
             } else {
                 Button {
-                    selectedWorktreeID = worktree.branchName
+                    selectedWorktreeID = worktree.path
                     startRunners(for: worktree)
                 } label: {
                     Label("Start Runners", systemImage: "play.fill")
@@ -183,12 +183,12 @@ struct SidebarView: View {
         guard let configs = worktree.project?.profile?.runConfigurations
             .sorted(by: { $0.order < $1.order }) else { return }
         for config in configs where !config.command.isEmpty {
-            let sessionId = "runner-\(worktree.branchName)-\(config.name)"
+            let sessionId = "runner-\(worktree.path)-\(config.name)"
             guard terminalSessionManager.sessions[sessionId] == nil else { continue }
             let session = terminalSessionManager.createRunnerSession(
                 id: sessionId,
                 title: config.name,
-                worktreeId: worktree.branchName,
+                worktreeId: worktree.path,
                 workingDirectory: worktree.path,
                 initialCommand: config.command
             )
@@ -199,7 +199,7 @@ struct SidebarView: View {
     }
 
     private func stopRunners(for worktree: Worktree) {
-        for session in terminalSessionManager.runnerSessions(forWorktree: worktree.branchName) {
+        for session in terminalSessionManager.runnerSessions(forWorktree: worktree.path) {
             terminalSessionManager.stopSession(id: session.id)
         }
     }
@@ -208,13 +208,13 @@ struct SidebarView: View {
 
     private func deleteWorktreeWithGit(_ worktree: Worktree) async {
         // 1. Stop and remove all runner sessions
-        for session in terminalSessionManager.runnerSessions(forWorktree: worktree.branchName) {
+        for session in terminalSessionManager.runnerSessions(forWorktree: worktree.path) {
             terminalSessionManager.stopSession(id: session.id)
         }
-        terminalSessionManager.removeRunnerSessions(forWorktree: worktree.branchName)
+        terminalSessionManager.removeRunnerSessions(forWorktree: worktree.path)
 
         // 2. Remove terminal tab sessions
-        for session in terminalSessionManager.sessions(forWorktree: worktree.branchName) {
+        for session in terminalSessionManager.sessions(forWorktree: worktree.path) {
             terminalSessionManager.removeTab(sessionId: session.id)
         }
 
@@ -240,7 +240,7 @@ struct SidebarView: View {
 
         // 4. Delete from SwiftData and clear selection
         await MainActor.run {
-            if selectedWorktreeID == worktree.branchName {
+            if selectedWorktreeID == worktree.path {
                 selectedWorktreeID = nil
             }
             modelContext.delete(worktree)

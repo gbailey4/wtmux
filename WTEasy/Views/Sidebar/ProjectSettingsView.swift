@@ -1,5 +1,7 @@
 import SwiftUI
 import WTCore
+import WTLLM
+import WTTransport
 
 struct ProjectSettingsView: View {
     @Bindable var project: Project
@@ -19,6 +21,12 @@ struct ProjectSettingsView: View {
     @State private var setupCommands: [String]
     @State private var envFilesToCopy: [String]
     @State private var terminalStartCommand: String
+
+    // AI analysis
+    @AppStorage("llmModel") private var llmModel = "claude-sonnet-4-5-20250929"
+    @State private var aiAnalysisState: ProjectAIAnalysisState = .idle
+    @State private var pendingAnalysis: ProjectAnalysis?
+    @State private var showAnalysisPreview = false
 
     init(project: Project) {
         self.project = project
@@ -50,6 +58,10 @@ struct ProjectSettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             Form {
+                Section {
+                    reanalyzeButton
+                }
+
                 Section("Repository") {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Project Name")
@@ -262,6 +274,18 @@ struct ProjectSettingsView: View {
                 }
             }
         }
+        .sheet(isPresented: $showAnalysisPreview) {
+            if let analysis = pendingAnalysis {
+                AIAnalysisPreviewSheet(analysis: analysis) {
+                    applyAnalysis(analysis)
+                    showAnalysisPreview = false
+                    pendingAnalysis = nil
+                } onCancel: {
+                    showAnalysisPreview = false
+                    pendingAnalysis = nil
+                }
+            }
+        }
     }
 
     private func browseRepoPath() {
@@ -320,6 +344,110 @@ struct ProjectSettingsView: View {
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var reanalyzeButton: some View {
+        if let apiKey = KeychainStore.loadAPIKey(for: .claude) {
+            switch aiAnalysisState {
+            case .idle:
+                Button {
+                    runAIAnalysis(apiKey: apiKey)
+                } label: {
+                    Label("Re-analyze with AI", systemImage: "sparkles")
+                }
+            case .gatheringContext:
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Gathering project files...")
+                        .foregroundStyle(.secondary)
+                }
+            case .analyzing:
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Analyzing project...")
+                        .foregroundStyle(.secondary)
+                }
+            case .failed(let message):
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                    Button {
+                        runAIAnalysis(apiKey: apiKey)
+                    } label: {
+                        Label("Retry", systemImage: "sparkles")
+                    }
+                }
+            }
+        } else {
+            HStack {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(.secondary)
+                Text("Configure an AI provider in Settings to auto-detect configuration")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                SettingsLink {
+                    Text("Open Settings")
+                        .font(.caption)
+                }
+            }
+        }
+    }
+
+    private func runAIAnalysis(apiKey: String) {
+        aiAnalysisState = .gatheringContext
+        Task {
+            let provider = ClaudeProvider(apiKey: apiKey, model: llmModel)
+            let transport = LocalTransport()
+            let service = AnalysisService(provider: provider, transport: transport)
+
+            for await progress in await service.analyze(repoPath: repoPath) {
+                switch progress {
+                case .gatheringContext:
+                    aiAnalysisState = .gatheringContext
+                case .analyzing:
+                    aiAnalysisState = .analyzing
+                case .complete(let analysis):
+                    aiAnalysisState = .idle
+                    pendingAnalysis = analysis
+                    showAnalysisPreview = true
+                case .failed(let error):
+                    aiAnalysisState = .failed(message: describeError(error))
+                }
+            }
+        }
+    }
+
+    private func applyAnalysis(_ analysis: ProjectAnalysis) {
+        envFilesToCopy = analysis.envFilesToCopy
+        setupCommands = analysis.setupCommands
+        terminalStartCommand = analysis.terminalStartCommand ?? ""
+        runConfigurations = analysis.runConfigurations.map { rc in
+            EditableRunConfig(
+                name: rc.name,
+                command: rc.command,
+                portString: rc.port.map(String.init) ?? "",
+                autoStart: rc.autoStart
+            )
+        }
+    }
+
+    private func describeError(_ error: LLMError) -> String {
+        switch error {
+        case .noAPIKey:
+            "Invalid API key. Check Settings."
+        case .networkError(let detail):
+            "Network error: \(detail)"
+        case .rateLimited:
+            "Rate limited. Try again shortly."
+        case .invalidResponse(let detail):
+            "Unexpected response: \(detail)"
+        case .timeout:
+            "Request timed out. Try again."
         }
     }
 
@@ -395,4 +523,11 @@ struct ProjectSettingsView: View {
             try? await configService.ensureGitignore(forRepo: repoPath)
         }
     }
+}
+
+private enum ProjectAIAnalysisState: Equatable {
+    case idle
+    case gatheringContext
+    case analyzing
+    case failed(message: String)
 }

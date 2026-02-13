@@ -51,6 +51,16 @@ The main app target (`WTEasy/`) contains the SwiftUI views organized by feature:
 - **Actor isolation:** `GitService` and `ProcessManager` are actors; strict concurrency checking is enabled (`SWIFT_STRICT_CONCURRENCY: complete`)
 - **SwiftData persistence:** Models use `@Model` macro with cascade delete relationships (Project → Worktrees, Project → ProjectProfile → RunConfigurations)
 
+## VS Code / Cursor LSP Setup
+
+After generating the Xcode project and building, run:
+
+```bash
+xcode-build-server config -project WTEasy.xcodeproj -scheme WTEasy
+```
+
+This creates `buildServer.json` which tells SourceKit-LSP to use the Xcode build system for module resolution. Re-run after `xcodegen generate` + build if module imports stop resolving.
+
 ## Configuration
 
 - Swift 6.0, macOS 15.0+, no app sandbox, no hardened runtime

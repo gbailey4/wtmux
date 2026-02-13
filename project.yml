@@ -20,6 +20,8 @@ packages:
     path: Packages/WTTerminal
   WTDiff:
     path: Packages/WTDiff
+  WTLLM:
+    path: Packages/WTLLM
 
 targets:
   WTEasy:
@@ -53,6 +55,7 @@ targets:
       - package: WTProcess
       - package: WTTerminal
       - package: WTDiff
+      - package: WTLLM
     info:
       path: WTEasy/Info.plist
       properties:
@@ -64,10 +67,37 @@ targets:
         CFBundlePackageType: APPL
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         LSApplicationCategoryType: public.app-category.developer-tools
+        CFBundleURLTypes:
+          - CFBundleURLName: com.grahampark.wteasy
+            CFBundleURLSchemes:
+              - wteasy
     entitlements:
       path: WTEasy/WTEasy.entitlements
       properties:
         com.apple.security.app-sandbox: false
+    postBuildScripts:
+      - name: "Build and embed wteasy-mcp"
+        basedOnDependencyAnalysis: false
+        script: |
+          if [ "$CONFIGURATION" = "Release" ]; then
+            SWIFT_CONFIG="release"
+          else
+            SWIFT_CONFIG="debug"
+          fi
+          swift build --package-path "$SRCROOT/Packages/WTMCP" -c $SWIFT_CONFIG 2>&1
+          cp -f "$SRCROOT/Packages/WTMCP/.build/$SWIFT_CONFIG/wteasy-mcp" "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/wteasy-mcp"
+          codesign --force --sign - "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/wteasy-mcp"
+      - name: "Build and embed wteasy-hook"
+        basedOnDependencyAnalysis: false
+        script: |
+          if [ "$CONFIGURATION" = "Release" ]; then
+            SWIFT_CONFIG="release"
+          else
+            SWIFT_CONFIG="debug"
+          fi
+          swift build --package-path "$SRCROOT/Packages/WTHook" -c $SWIFT_CONFIG 2>&1
+          cp -f "$SRCROOT/Packages/WTHook/.build/$SWIFT_CONFIG/wteasy-hook" "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/wteasy-hook"
+          codesign --force --sign - "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/wteasy-hook"
 
 schemes:
   WTEasy:

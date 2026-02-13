@@ -15,5 +15,9 @@ Package.resolved
 # macOS
 .DS_Store
 
+# SourceKit-LSP (machine-specific DerivedData paths)
+buildServer.json
+
 # Claude Code local settings
 .claude/settings.local.json
+.wteasy
