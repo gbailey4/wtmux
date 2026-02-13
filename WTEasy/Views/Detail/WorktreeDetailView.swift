@@ -353,10 +353,30 @@ struct WorktreeDetailView: View {
 
     // MARK: - Tabbed Terminal
 
+    private func createNewTerminalTab() {
+        Task {
+            var startCommand: String?
+            if let repoPath = worktree.project?.repoPath {
+                let applicator = ProfileApplicator()
+                if let config = await applicator.loadConfig(forRepo: repoPath),
+                   let cmd = config.terminalStartCommand, !cmd.isEmpty {
+                    startCommand = cmd
+                }
+            }
+            _ = terminalSessionManager.createTab(
+                forWorktree: worktreeId,
+                workingDirectory: worktree.path,
+                initialCommand: startCommand
+            )
+        }
+    }
+
     @ViewBuilder
     private var tabbedTerminalView: some View {
         VStack(spacing: 0) {
-            terminalTabBar
+            if !terminalTabs.isEmpty {
+                terminalTabBar
+            }
             ZStack {
                 // All tab sessions across ALL worktrees live here so
                 // terminal views (and their PTY processes) survive
@@ -366,6 +386,18 @@ struct WorktreeDetailView: View {
                     TerminalRepresentable(session: session, isActive: active, theme: currentTheme)
                         .opacity(active ? 1 : 0)
                         .allowsHitTesting(active)
+                }
+                if terminalTabs.isEmpty {
+                    ContentUnavailableView {
+                        Label("No Terminal", systemImage: "terminal")
+                    } description: {
+                        Text("Open a new terminal to get started.")
+                    } actions: {
+                        Button("New Terminal") {
+                            createNewTerminalTab()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                 }
             }
         }
@@ -377,13 +409,13 @@ struct WorktreeDetailView: View {
             if let projectName = worktree.project?.name {
                 HStack(spacing: 4) {
                     Text(projectName)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                     Text("/")
-                        .foregroundStyle(.quaternary)
+                        .foregroundStyle(.tertiary)
                     Text(worktree.branchName)
                         .foregroundStyle(.secondary)
                 }
-                .font(.caption)
+                .font(.subheadline)
                 .padding(.horizontal, 10)
 
                 Divider()
@@ -406,9 +438,9 @@ struct WorktreeDetailView: View {
                     showRunnerPanel = true
                     ensureRunnerSessions()
                     launchAutoStartRunners()
-                } label: {
+                }                 label: {
                     Image(systemName: "play.fill")
-                        .font(.caption)
+                        .font(.subheadline)
                         .padding(6)
                 }
                 .buttonStyle(.plain)
@@ -416,24 +448,10 @@ struct WorktreeDetailView: View {
             }
 
             Button {
-                Task {
-                    var startCommand: String?
-                    if let repoPath = worktree.project?.repoPath {
-                        let applicator = ProfileApplicator()
-                        if let config = await applicator.loadConfig(forRepo: repoPath),
-                           let cmd = config.terminalStartCommand, !cmd.isEmpty {
-                            startCommand = cmd
-                        }
-                    }
-                    _ = terminalSessionManager.createTab(
-                        forWorktree: worktreeId,
-                        workingDirectory: worktree.path,
-                        initialCommand: startCommand
-                    )
-                }
+                createNewTerminalTab()
             } label: {
                 Image(systemName: "plus")
-                    .font(.caption)
+                    .font(.subheadline)
                     .padding(6)
             }
             .buttonStyle(.plain)
@@ -452,20 +470,18 @@ struct WorktreeDetailView: View {
             }
             .buttonStyle(.plain)
 
-            if terminalTabs.count > 1 {
-                Button {
-                    if session.terminalView?.hasChildProcesses() == true {
-                        pendingCloseSessionId = session.id
-                        showCloseTabAlert = true
-                    } else {
-                        terminalSessionManager.removeTab(sessionId: session.id)
-                    }
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
+            Button {
+                if session.terminalView?.hasChildProcesses() == true {
+                    pendingCloseSessionId = session.id
+                    showCloseTabAlert = true
+                } else {
+                    terminalSessionManager.removeTab(sessionId: session.id)
                 }
-                .buttonStyle(.plain)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -542,12 +558,12 @@ struct WorktreeDetailView: View {
                 // Start All idle sessions
                 Button {
                     startRunners()
-                } label: {
+                }                 label: {
                     HStack(spacing: 3) {
                         Image(systemName: "play.fill")
-                            .font(.system(size: 9))
+                            .font(.system(size: 11))
                         Text("Start All")
-                            .font(.caption)
+                            .font(.subheadline)
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
@@ -560,9 +576,9 @@ struct WorktreeDetailView: View {
                 // Restart all
                 Button {
                     restartAllRunners()
-                } label: {
+                }                 label: {
                     Image(systemName: "arrow.counterclockwise")
-                        .font(.caption)
+                        .font(.subheadline)
                         .padding(4)
                 }
                 .buttonStyle(.plain)
@@ -571,9 +587,9 @@ struct WorktreeDetailView: View {
                 // Stop all
                 Button {
                     stopAllRunners()
-                } label: {
+                }                 label: {
                     Image(systemName: "stop.fill")
-                        .font(.caption)
+                        .font(.subheadline)
                         .padding(4)
                 }
                 .buttonStyle(.plain)
@@ -582,9 +598,9 @@ struct WorktreeDetailView: View {
                 // Close/remove all runners
                 Button {
                     removeAllRunners()
-                } label: {
+                }                 label: {
                     Image(systemName: "xmark.circle")
-                        .font(.caption)
+                        .font(.subheadline)
                         .padding(4)
                 }
                 .buttonStyle(.plain)
@@ -594,9 +610,9 @@ struct WorktreeDetailView: View {
             // Collapse chevron
             Button {
                 showRunnerPanel = false
-            } label: {
+            }             label: {
                 Image(systemName: "chevron.down")
-                    .font(.caption)
+                    .font(.subheadline)
                     .padding(4)
             }
             .buttonStyle(.plain)
@@ -616,19 +632,19 @@ struct WorktreeDetailView: View {
             case .running:
                 Circle()
                     .fill(.green)
-                    .frame(width: 6, height: 6)
+                    .frame(width: 8, height: 8)
             case .succeeded:
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
-                    .font(.system(size: 10))
+                    .font(.system(size: 12))
             case .failed:
                 Image(systemName: "xmark.circle.fill")
                     .foregroundStyle(.red)
-                    .font(.system(size: 10))
+                    .font(.system(size: 12))
             case .idle:
                 Circle()
                     .fill(.secondary)
-                    .frame(width: 6, height: 6)
+                    .frame(width: 8, height: 8)
             }
 
             Button {
@@ -648,7 +664,7 @@ struct WorktreeDetailView: View {
                         }
                     } label: {
                         Text(":\(port)")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(.system(size: 12, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
@@ -664,7 +680,7 @@ struct WorktreeDetailView: View {
                             config.port = Int(port)
                         } label: {
                             Image(systemName: "arrow.down.circle")
-                                .font(.system(size: 8))
+                                .font(.system(size: 10))
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
@@ -687,7 +703,7 @@ struct WorktreeDetailView: View {
                         }
                     } label: {
                         Image(systemName: "play.fill")
-                            .font(.system(size: 8))
+                            .font(.system(size: 11))
                     }
                     .buttonStyle(.plain)
                     .help("Start")
@@ -697,7 +713,7 @@ struct WorktreeDetailView: View {
                         terminalSessionManager.restartSession(id: session.id)
                     } label: {
                         Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 8))
+                            .font(.system(size: 11))
                     }
                     .buttonStyle(.plain)
                     .help("Restart")
@@ -707,7 +723,7 @@ struct WorktreeDetailView: View {
                         terminalSessionManager.stopSession(id: session.id)
                     } label: {
                         Image(systemName: "stop.fill")
-                            .font(.system(size: 8))
+                            .font(.system(size: 11))
                     }
                     .buttonStyle(.plain)
                     .help("Stop")
@@ -733,15 +749,15 @@ struct WorktreeDetailView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.up")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
 
                 if configRunnerTabs.isEmpty {
                     Image(systemName: "play.fill")
-                        .font(.system(size: 9))
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                     Text(runConfigSummaryText)
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
                     runnerStatusSummary
@@ -749,8 +765,8 @@ struct WorktreeDetailView: View {
 
                 Spacer()
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -767,24 +783,24 @@ struct WorktreeDetailView: View {
         HStack(spacing: 8) {
             if running > 0 {
                 HStack(spacing: 3) {
-                    Circle().fill(.green).frame(width: 6, height: 6)
-                    Text("\(running) running").font(.caption).foregroundStyle(.secondary)
+                    Circle().fill(.green).frame(width: 8, height: 8)
+                    Text("\(running) running").font(.subheadline).foregroundStyle(.secondary)
                 }
             }
             if failed > 0 {
                 HStack(spacing: 3) {
-                    Circle().fill(.red).frame(width: 6, height: 6)
-                    Text("\(failed) failed").font(.caption).foregroundStyle(.secondary)
+                    Circle().fill(.red).frame(width: 8, height: 8)
+                    Text("\(failed) failed").font(.subheadline).foregroundStyle(.secondary)
                 }
             }
             if stopped > 0 {
                 HStack(spacing: 3) {
-                    Circle().fill(.secondary).frame(width: 6, height: 6)
-                    Text("\(stopped) stopped").font(.caption).foregroundStyle(.secondary)
+                    Circle().fill(.secondary).frame(width: 8, height: 8)
+                    Text("\(stopped) stopped").font(.subheadline).foregroundStyle(.secondary)
                 }
             }
             if idle > 0 && idle == configRunnerTabs.count {
-                Text(runConfigSummaryText).font(.caption).foregroundStyle(.secondary)
+                Text(runConfigSummaryText).font(.subheadline).foregroundStyle(.secondary)
             }
 
             // Aggregate listening ports across all running runners
@@ -793,7 +809,7 @@ struct WorktreeDetailView: View {
                 HStack(spacing: 3) {
                     ForEach(allPorts, id: \.self) { port in
                         Text(":\(port)")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(.system(size: 12, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)

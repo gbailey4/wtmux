@@ -62,6 +62,7 @@ struct WTEasyApp: App {
         }
         .handlesExternalEvents(matching: ["*"])
         .modelContainer(modelContainer)
+        .defaultSize(width: 1280, height: 800)
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified(showsTitle: true))
         .commands {

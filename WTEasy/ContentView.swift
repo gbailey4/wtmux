@@ -22,6 +22,7 @@ struct ContentView: View {
                 projects: projects,
                 selectedWorktreeID: $selectedWorktreeID,
                 showingAddProject: $showingAddProject,
+                showRunnerPanel: $showRunnerPanel,
                 terminalSessionManager: terminalSessionManager,
                 claudeStatusManager: claudeStatusManager
             )
@@ -53,7 +54,7 @@ struct ContentView: View {
                         .overlay(alignment: .topTrailing) {
                             if changedFileCount > 0 {
                                 Text("\(changedFileCount)")
-                                    .font(.system(size: 9, weight: .bold))
+                                    .font(.system(size: 11, weight: .bold))
                                     .foregroundStyle(.white)
                                     .padding(.horizontal, 4)
                                     .padding(.vertical, 1)

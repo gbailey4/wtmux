@@ -13,6 +13,7 @@ struct SidebarView: View {
     let projects: [Project]
     @Binding var selectedWorktreeID: String?
     @Binding var showingAddProject: Bool
+    @Binding var showRunnerPanel: Bool
     let terminalSessionManager: TerminalSessionManager
     let claudeStatusManager: ClaudeStatusManager
 
@@ -23,6 +24,10 @@ struct SidebarView: View {
     @State private var showDeleteConfirmation = false
     @State private var deleteError: String?
     @State private var showDeleteError = false
+    @State private var showRunnerConflictAlert = false
+    @State private var conflictingWorktreeName = ""
+    @State private var conflictingPorts: [Int] = []
+    @State private var worktreeToStartRunners: Worktree?
 
     private var runningWorktreeIds: Set<String> {
         // Read runnerStateVersion to trigger re-evaluation when runners stop/restart
@@ -39,10 +44,13 @@ struct SidebarView: View {
                             worktree: worktree,
                             isRunning: runningWorktreeIds.contains(worktree.path),
                             claudeStatus: claudeStatusManager.status(forWorktreePath: worktree.path),
-                            onDelete: {
-                                worktreeToDelete = worktree
-                                showDeleteConfirmation = true
-                            }
+                            hasRunConfigurations: hasRunConfigurations(for: worktree),
+                            onStartRunners: {
+                                selectedWorktreeID = worktree.path
+                                showRunnerPanel = true
+                                requestStartRunners(for: worktree)
+                            },
+                            onStopRunners: { stopRunners(for: worktree) }
                         )
                             .tag(worktree.path)
                             .contextMenu {
@@ -57,7 +65,7 @@ struct SidebarView: View {
                             worktreeTargetProject = project
                         } label: {
                             Image(systemName: "plus")
-                                .font(.caption)
+                                .font(.subheadline)
                         }
                         .buttonStyle(.borderless)
                         .help("New Worktree")
@@ -81,9 +89,10 @@ struct SidebarView: View {
                     showingAddProject = true
                 } label: {
                     Label("Add Project", systemImage: "plus")
+                        .font(.subheadline)
                 }
                 .buttonStyle(.borderless)
-                .padding(12)
+                .padding(14)
                 Spacer()
             }
         }
@@ -111,6 +120,24 @@ struct SidebarView: View {
             Button("OK") { deleteError = nil }
         } message: {
             Text(deleteError ?? "An unknown error occurred.")
+        }
+        .alert("Runners Already Active", isPresented: $showRunnerConflictAlert) {
+            Button("Stop & Switch") {
+                if let worktree = worktreeToStartRunners {
+                    stopConflictingAndStartRunners(for: worktree)
+                }
+                worktreeToStartRunners = nil
+            }
+            Button("Cancel", role: .cancel) {
+                worktreeToStartRunners = nil
+            }
+        } message: {
+            if conflictingPorts.isEmpty {
+                Text("Worktree \"\(conflictingWorktreeName)\" is already running. Starting runners here may cause port conflicts.")
+            } else {
+                let ports = conflictingPorts.map(String.init).joined(separator: ", ")
+                Text("Worktree \"\(conflictingWorktreeName)\" is already using port\(conflictingPorts.count > 1 ? "s" : "") \(ports). Stop its runners and start here instead?")
+            }
         }
     }
 
@@ -182,21 +209,70 @@ struct SidebarView: View {
         !(worktree.project?.profile?.runConfigurations.isEmpty ?? true)
     }
 
+    private func requestStartRunners(for worktree: Worktree) {
+        if let conflict = conflictingWorktree(for: worktree) {
+            worktreeToStartRunners = worktree
+            conflictingWorktreeName = conflict.branchName
+            conflictingPorts = conflictingPortList(for: worktree)
+            showRunnerConflictAlert = true
+            return
+        }
+        startRunners(for: worktree)
+    }
+
+    /// Finds another worktree in the same project that has running runners.
+    private func conflictingWorktree(for worktree: Worktree) -> Worktree? {
+        guard let project = worktree.project else { return nil }
+        let _ = terminalSessionManager.runnerStateVersion
+        for sibling in project.worktrees where sibling.path != worktree.path {
+            let runners = terminalSessionManager.runnerSessions(forWorktree: sibling.path)
+            if runners.contains(where: { $0.isProcessRunning }) {
+                return sibling
+            }
+        }
+        return nil
+    }
+
+    private func conflictingPortList(for worktree: Worktree) -> [Int] {
+        guard let configs = worktree.project?.profile?.runConfigurations else { return [] }
+        return configs.compactMap(\.port).sorted()
+    }
+
+    private func stopConflictingAndStartRunners(for worktree: Worktree) {
+        guard let project = worktree.project else { return }
+        for sibling in project.worktrees where sibling.path != worktree.path {
+            for session in terminalSessionManager.runnerSessions(forWorktree: sibling.path) {
+                terminalSessionManager.stopSession(id: session.id)
+            }
+            terminalSessionManager.removeRunnerSessions(forWorktree: sibling.path)
+        }
+        startRunners(for: worktree)
+    }
+
     private func startRunners(for worktree: Worktree) {
         guard let configs = worktree.project?.profile?.runConfigurations
             .sorted(by: { $0.order < $1.order }) else { return }
         for config in configs where !config.command.isEmpty {
-            let sessionId = "runner-\(worktree.path)-\(config.name)"
+            let sessionId = SessionID.runner(worktreeId: worktree.path, name: config.name)
             guard terminalSessionManager.sessions[sessionId] == nil else { continue }
             let session = terminalSessionManager.createRunnerSession(
                 id: sessionId,
                 title: config.name,
                 worktreeId: worktree.path,
                 workingDirectory: worktree.path,
-                initialCommand: config.command
+                initialCommand: config.command,
+                deferExecution: true
             )
             session.onProcessExit = { [weak terminalSessionManager] sessionId, exitCode in
                 terminalSessionManager?.handleProcessExit(sessionId: sessionId, exitCode: exitCode)
+            }
+        }
+        // Defer startSession to next run loop so terminal views have time to render
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            for config in configs where !config.command.isEmpty {
+                let sessionId = SessionID.runner(worktreeId: worktree.path, name: config.name)
+                terminalSessionManager.startSession(id: sessionId)
             }
         }
     }
@@ -266,17 +342,37 @@ struct SidebarView: View {
     }
 }
 
+private let projectColorPalette: [Color] = [
+    .blue,
+    .green,
+    .orange,
+    .purple,
+    .teal,
+    .pink,
+    .indigo,
+    .cyan,
+]
+
+private func projectColor(for project: Project) -> Color {
+    let index = abs(project.name.hashValue) % projectColorPalette.count
+    return projectColorPalette[index]
+}
+
 struct ProjectRow: View {
     let project: Project
 
     var body: some View {
-        HStack {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(projectColor(for: project))
+                .frame(width: 4, height: 14)
             Image(systemName: project.isRemote ? "globe" : "folder.fill")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(projectColor(for: project))
                 .font(.title3)
             Text(project.name)
                 .font(.title3)
                 .fontWeight(.medium)
+                .foregroundStyle(.primary)
         }
     }
 }
@@ -285,7 +381,9 @@ struct WorktreeRow: View {
     let worktree: Worktree
     var isRunning: Bool = false
     var claudeStatus: ClaudeCodeStatus? = nil
-    var onDelete: (() -> Void)?
+    var hasRunConfigurations: Bool = false
+    var onStartRunners: (() -> Void)? = nil
+    var onStopRunners: (() -> Void)? = nil
 
     @State private var isHovered = false
 
@@ -293,35 +391,49 @@ struct WorktreeRow: View {
         HStack {
             Image(systemName: statusIcon)
                 .foregroundStyle(statusColor)
-                .font(.caption)
+                .font(.subheadline)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     Text(worktree.branchName)
+                        .font(.subheadline)
                         .lineLimit(1)
-                    if isRunning {
-                        Circle()
-                            .fill(.green)
-                            .frame(width: 6, height: 6)
-                    }
                     if let claudeStatus {
                         claudeBadge(claudeStatus)
                     }
                 }
                 Text(worktree.baseBranch)
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if isHovered, let onDelete {
-                Button {
-                    onDelete()
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+            if isHovered, hasRunConfigurations {
+                if isRunning, let onStopRunners {
+                    Button {
+                        onStopRunners()
+                    } label: {
+                        Image(systemName: "stop.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Stop Runners")
+                } else if let onStartRunners {
+                    Button {
+                        onStartRunners()
+                    } label: {
+                        Image(systemName: "play.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Start Runners")
                 }
-                .buttonStyle(.plain)
-                .help("Delete Worktree")
+            }
+            if isRunning {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.green)
+                    .help("Runners active")
             }
         }
         .onHover { hovering in
@@ -354,25 +466,25 @@ struct WorktreeRow: View {
         switch status {
         case .idle:
             Image(systemName: "circle.fill")
-                .font(.system(size: 6))
+                .font(.system(size: 8))
                 .foregroundStyle(.secondary)
         case .thinking:
             Image(systemName: "circle.fill")
-                .font(.system(size: 6))
+                .font(.system(size: 8))
                 .foregroundStyle(.purple)
                 .symbolEffect(.pulse)
         case .working:
             Image(systemName: "circle.fill")
-                .font(.system(size: 6))
+                .font(.system(size: 8))
                 .foregroundStyle(.blue)
                 .symbolEffect(.pulse)
         case .needsAttention:
             Image(systemName: "circle.fill")
-                .font(.system(size: 6))
+                .font(.system(size: 8))
                 .foregroundStyle(.orange)
         case .done:
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 8))
+                .font(.system(size: 10))
                 .foregroundStyle(.green)
         }
     }
