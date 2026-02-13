@@ -548,6 +548,13 @@ struct AddProjectView: View {
         runConfigurations = analysis.toEditableRunConfigs()
     }
 
+    /// Returns an existing project that already uses this `repoPath`, or `nil`.
+    private func existingProject(for path: String) -> Project? {
+        let predicate = #Predicate<Project> { $0.repoPath == path }
+        let descriptor = FetchDescriptor<Project>(predicate: predicate)
+        return try? modelContext.fetch(descriptor).first
+    }
+
     private func createBareProjectWithClaude() {
         let branchName = firstWorktreeBranch.trimmingCharacters(in: .whitespaces)
         guard !branchName.isEmpty else { return }
@@ -571,21 +578,34 @@ struct AddProjectView: View {
                 return
             }
 
-            // 2. Create bare project with empty profile
-            let project = Project(
-                name: projectName,
-                repoPath: repoPath,
-                defaultBranch: defaultBranch,
-                worktreeBasePath: worktreeBasePath
-            )
+            // 2. Create or reuse project
+            let project: Project
+            if let existing = existingProject(for: repoPath) {
+                project = existing
+                // Update fields but preserve user-chosen name
+                project.defaultBranch = defaultBranch
+                project.worktreeBasePath = worktreeBasePath
+            } else {
+                project = Project(
+                    name: projectName,
+                    repoPath: repoPath,
+                    defaultBranch: defaultBranch,
+                    worktreeBasePath: worktreeBasePath
+                )
+                modelContext.insert(project)
+            }
             if isRemote {
                 project.sshHost = sshHost
                 project.sshUser = sshUser
                 project.sshPort = Int(sshPort) ?? 22
             }
-            let profile = ProjectProfile()
-            profile.project = project
-            project.profile = profile
+
+            // Ensure profile exists
+            if project.profile == nil {
+                let profile = ProjectProfile()
+                profile.project = project
+                project.profile = profile
+            }
 
             // 3. Create worktree model
             let worktree = Worktree(
@@ -596,7 +616,6 @@ struct AddProjectView: View {
             )
             worktree.project = project
 
-            modelContext.insert(project)
             do {
                 try modelContext.save()
             } catch {
@@ -618,12 +637,21 @@ struct AddProjectView: View {
     }
 
     private func createProject() {
-        let project = Project(
-            name: projectName,
-            repoPath: repoPath,
-            defaultBranch: defaultBranch,
-            worktreeBasePath: worktreeBasePath
-        )
+        // Reuse an existing project for this repo path if one already exists
+        let project: Project
+        if let existing = existingProject(for: repoPath) {
+            project = existing
+            project.defaultBranch = defaultBranch
+            project.worktreeBasePath = worktreeBasePath
+        } else {
+            project = Project(
+                name: projectName,
+                repoPath: repoPath,
+                defaultBranch: defaultBranch,
+                worktreeBasePath: worktreeBasePath
+            )
+            modelContext.insert(project)
+        }
 
         if isRemote {
             project.sshHost = sshHost
@@ -631,11 +659,17 @@ struct AddProjectView: View {
             project.sshPort = Int(sshPort) ?? 22
         }
 
-        // Create profile
-        let profile = ProjectProfile()
+        // Create or update profile
+        let profile = project.profile ?? ProjectProfile()
         profile.envFilesToCopy = Array(selectedEnvFiles)
         profile.setupCommands = setupCommands.filter { !$0.isEmpty }
         profile.terminalStartCommand = terminalStartCommand.isEmpty ? nil : terminalStartCommand
+
+        // Clear existing run configurations before adding new ones
+        for rc in profile.runConfigurations {
+            modelContext.delete(rc)
+        }
+        profile.runConfigurations = []
 
         for (index, config) in runConfigurations.enumerated() where !config.name.isEmpty {
             let rc = RunConfiguration(
@@ -651,8 +685,6 @@ struct AddProjectView: View {
 
         profile.project = project
         project.profile = profile
-
-        modelContext.insert(project)
         do {
             try modelContext.save()
         } catch {

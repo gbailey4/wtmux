@@ -240,7 +240,7 @@ struct ToolHandlers: Sendable {
         ) {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-            process.arguments = ["wteasy://import-project?path=\(encodedPath)"]
+            process.arguments = ["-g", "wteasy://import-project?path=\(encodedPath)"]
             try? process.run()
             process.waitUntilExit()
         }

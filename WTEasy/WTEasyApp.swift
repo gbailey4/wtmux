@@ -60,6 +60,7 @@ struct WTEasyApp: App {
                 ContentView()
             }
         }
+        .handlesExternalEvents(matching: ["*"])
         .modelContainer(modelContainer)
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified(showsTitle: true))
