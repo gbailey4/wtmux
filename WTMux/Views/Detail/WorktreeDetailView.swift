@@ -11,6 +11,7 @@ struct WorktreeDetailView: View {
     @Binding var showRightPanel: Bool
     @Binding var showRunnerPanel: Bool
     @Binding var changedFileCount: Int
+    var isPaneFocused: Bool = true
 
     @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
@@ -43,12 +44,6 @@ struct WorktreeDetailView: View {
 
     private var activeTabId: String? {
         terminalSessionManager.activeSessionId[worktreeId]
-    }
-
-    private var allTabSessions: [TerminalSession] {
-        terminalSessionManager.sessions.values
-            .filter { !$0.worktreeId.isEmpty && !SessionID.isRunner($0.id) }
-            .sorted { $0.id < $1.id }
     }
 
     private var runConfigurations: [RunConfiguration] {
@@ -110,10 +105,6 @@ struct WorktreeDetailView: View {
 
     private var activeRunnerTabId: String? {
         terminalSessionManager.activeRunnerSessionId[worktreeId]
-    }
-
-    private var allRunnerSessions: [TerminalSession] {
-        terminalSessionManager.allRunnerSessions()
     }
 
     private var hasRunConfigurations: Bool {
@@ -532,14 +523,11 @@ struct WorktreeDetailView: View {
                 terminalTabBar
             }
             ZStack {
-                // All tab sessions across ALL worktrees live here so
-                // terminal views (and their PTY processes) survive
-                // worktree switches.  Only the active tab is visible.
-                ForEach(allTabSessions) { session in
-                    let active = session.id == activeTabId
-                    TerminalRepresentable(session: session, isActive: active, theme: currentTheme)
-                        .opacity(active ? 1 : 0)
-                        .allowsHitTesting(active)
+                ForEach(terminalTabs) { session in
+                    let isActiveTab = session.id == activeTabId
+                    TerminalRepresentable(session: session, isActive: isActiveTab && isPaneFocused, theme: currentTheme)
+                        .opacity(isActiveTab ? 1 : 0)
+                        .allowsHitTesting(isActiveTab)
                 }
                 if terminalTabs.isEmpty {
                     ContentUnavailableView {
@@ -711,12 +699,11 @@ struct WorktreeDetailView: View {
                 setupSubTabBar
             }
             ZStack {
-                // Persist all runner sessions across worktree switches
-                ForEach(allRunnerSessions) { session in
-                    let active = session.id == activeRunnerTabId
-                    TerminalRepresentable(session: session, isActive: active, theme: currentTheme)
-                        .opacity(active ? 1 : 0)
-                        .allowsHitTesting(active)
+                ForEach(runnerTabs) { session in
+                    let isActiveRunner = session.id == activeRunnerTabId
+                    TerminalRepresentable(session: session, isActive: isActiveRunner && isPaneFocused, theme: currentTheme)
+                        .opacity(isActiveRunner ? 1 : 0)
+                        .allowsHitTesting(isActiveRunner)
                 }
 
                 // Play overlay for idle/deferred sessions

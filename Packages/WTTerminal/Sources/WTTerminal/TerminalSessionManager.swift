@@ -127,6 +127,17 @@ public final class TerminalSessionManager: @unchecked Sendable {
         sessions.removeValue(forKey: id)
     }
 
+    /// Terminates and removes all sessions (tabs + runners) for a worktree.
+    public func terminateAllSessionsForWorktree(_ worktreeId: String) {
+        let tabIds = orderedSessions(forWorktree: worktreeId).map(\.id)
+        for sessionId in tabIds {
+            removeTab(sessionId: sessionId)
+        }
+        removeRunnerSessions(forWorktree: worktreeId)
+        activeSessionId.removeValue(forKey: worktreeId)
+        tabOrder.removeValue(forKey: worktreeId)
+    }
+
     /// Returns `true` if any session has an active process — either a runner
     /// in the `.running` state or a terminal tab with child processes.
     public func hasAnyRunningProcesses() -> Bool {

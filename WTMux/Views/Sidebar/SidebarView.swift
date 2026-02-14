@@ -8,14 +8,28 @@ import WTTransport
 import os.log
 
 private let logger = Logger(subsystem: "com.wtmux", category: "SidebarView")
+private let dragLogger = Logger(subsystem: "com.wtmux", category: "SidebarDrag")
 
 struct SidebarView: View {
     let projects: [Project]
-    @Binding var selectedWorktreeID: String?
+    let paneManager: SplitPaneManager
     @Binding var showingAddProject: Bool
-    @Binding var showRunnerPanel: Bool
     let terminalSessionManager: TerminalSessionManager
     let claudeStatusManager: ClaudeStatusManager
+
+    private var selectedWorktreeID: Binding<String?> {
+        Binding(
+            get: { paneManager.focusedPane?.worktreeID },
+            set: { newValue in
+                guard let worktreeID = newValue else { return }
+                if paneManager.visibleWorktreeIDs.contains(worktreeID) {
+                    paneManager.focusPane(containing: worktreeID)
+                } else if let paneID = paneManager.focusedPaneID {
+                    paneManager.assignWorktree(worktreeID, to: paneID)
+                }
+            }
+        )
+    }
 
     @Environment(\.modelContext) private var modelContext
     @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
@@ -43,7 +57,7 @@ struct SidebarView: View {
     }
 
     var body: some View {
-        List(selection: $selectedWorktreeID) {
+        List(selection: selectedWorktreeID) {
             ForEach(projects) { project in
                 Section {
                     if !project.isCollapsed {
@@ -52,25 +66,22 @@ struct SidebarView: View {
                             worktree: worktree,
                             isDeleting: deletingWorktreePaths.contains(worktree.path),
                             isRunning: runningWorktreeIds.contains(worktree.path),
+                            isVisibleInPane: paneManager.visibleWorktreeIDs.contains(worktree.path),
                             claudeStatus: claudeStatusManager.status(forWorktreePath: worktree.path),
                             hasRunConfigurations: hasRunConfigurations(for: worktree),
                             onStartRunners: {
-                                selectedWorktreeID = worktree.path
-                                showRunnerPanel = true
+                                selectedWorktreeID.wrappedValue = worktree.path
+                                paneManager.focusedPane?.showRunnerPanel = true
                                 requestStartRunners(for: worktree)
                             },
                             onStopRunners: { stopRunners(for: worktree) }
                         )
                             .tag(worktree.path)
-                            .dropDestination(for: String.self) { droppedIds, _ in
-                                projectDropTargetRepoPath = nil
-                                guard let droppedPath = droppedIds.first,
-                                      droppedPath != project.repoPath,
-                                      isProjectRepoPath(droppedPath) else { return false }
-                                reorderProject(droppedRepoPath: droppedPath, targetRepoPath: project.repoPath)
-                                return true
-                            } isTargeted: { isTargeted in
-                                projectDropTargetRepoPath = isTargeted ? project.repoPath : nil
+                            .draggable(WorktreeReference(worktreeID: worktree.path, sourcePaneID: nil)) {
+                                WorktreeRow(worktree: worktree)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(.background, in: RoundedRectangle(cornerRadius: 6))
                             }
                             .selectionDisabled(deletingWorktreePaths.contains(worktree.path))
                             .contextMenu {
@@ -135,7 +146,7 @@ struct SidebarView: View {
                                     workingDirectory: firstWorktree.path,
                                     repoPath: project.repoPath
                                 )
-                                selectedWorktreeID = firstWorktree.path
+                                selectedWorktreeID.wrappedValue = firstWorktree.path
                             } label: {
                                 Label("Configure with Claude", systemImage: "terminal")
                             }
@@ -305,7 +316,7 @@ struct SidebarView: View {
                 }
             } else {
                 Button {
-                    selectedWorktreeID = worktree.path
+                    selectedWorktreeID.wrappedValue = worktree.path
                     startRunners(for: worktree)
                 } label: {
                     Label("Start Runners", systemImage: "play.fill")
@@ -314,6 +325,15 @@ struct SidebarView: View {
 
             Divider()
         }
+
+        Button {
+            paneManager.splitRight(worktreeID: worktree.path)
+        } label: {
+            Label("Open in New Split", systemImage: "rectangle.split.2x1")
+        }
+        .disabled(paneManager.panes.count >= 5)
+
+        Divider()
 
         Button {
             NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: worktree.path)
@@ -480,9 +500,7 @@ struct SidebarView: View {
 
         // 5. Delete from SwiftData and clear selection
         await MainActor.run {
-            if selectedWorktreeID == worktree.path {
-                selectedWorktreeID = nil
-            }
+            paneManager.clearWorktree(worktree.path)
             modelContext.delete(worktree)
             do {
                 try modelContext.save()
@@ -502,9 +520,7 @@ struct SidebarView: View {
             for session in terminalSessionManager.sessions(forWorktree: worktree.path) {
                 terminalSessionManager.removeTab(sessionId: session.id)
             }
-            if selectedWorktreeID == worktree.path {
-                selectedWorktreeID = nil
-            }
+            paneManager.clearWorktree(worktree.path)
         }
 
         modelContext.delete(project)
@@ -553,8 +569,8 @@ struct SidebarView: View {
         }
 
         await MainActor.run {
-            if let sel = selectedWorktreeID, worktrees.contains(where: { $0.path == sel }) {
-                selectedWorktreeID = nil
+            for worktree in worktrees {
+                paneManager.clearWorktree(worktree.path)
             }
             modelContext.delete(project)
             do {
@@ -635,6 +651,7 @@ struct WorktreeRow: View {
     let worktree: Worktree
     var isDeleting: Bool = false
     var isRunning: Bool = false
+    var isVisibleInPane: Bool = false
     var claudeStatus: ClaudeCodeStatus? = nil
     var hasRunConfigurations: Bool = false
     var onStartRunners: (() -> Void)? = nil
@@ -695,6 +712,12 @@ struct WorktreeRow: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.green)
                     .help("Runners active")
+            }
+            if !isDeleting, isVisibleInPane {
+                Circle()
+                    .fill(Color.accentColor)
+                    .frame(width: 6, height: 6)
+                    .help("Visible in pane")
             }
         }
         .opacity(isDeleting ? 0.5 : 1.0)
