@@ -180,27 +180,51 @@ public final class TerminalSessionManager: @unchecked Sendable {
         activeRunnerSessionId[worktreeId] = sessionId
     }
 
-    /// Creates a setup runner session that runs a command non-interactively.
-    public func createSetupSession(
+    /// Creates one setup runner session per command, each running non-interactively in its own tab.
+    @discardableResult
+    public func createSetupSessions(
         worktreeId: String,
         workingDirectory: String,
-        command: String
-    ) -> TerminalSession {
-        let id = SessionID.setup(worktreeId: worktreeId)
-        if let existing = sessions[id] {
-            return existing
+        commands: [String]
+    ) -> [TerminalSession] {
+        var results: [TerminalSession] = []
+        for (index, command) in commands.enumerated() {
+            let id = SessionID.setup(worktreeId: worktreeId, index: index)
+            if let existing = sessions[id] {
+                results.append(existing)
+                continue
+            }
+            let session = TerminalSession(
+                id: id,
+                title: command,
+                worktreeId: worktreeId,
+                workingDirectory: workingDirectory,
+                initialCommand: command
+            )
+            session.runAsCommand = true
+            sessions[id] = session
+            results.append(session)
         }
-        let session = TerminalSession(
-            id: id,
-            title: "Setup",
-            worktreeId: worktreeId,
-            workingDirectory: workingDirectory,
-            initialCommand: command
-        )
-        session.runAsCommand = true
-        sessions[id] = session
-        activeRunnerSessionId[worktreeId] = id
-        return session
+        // Auto-select the first setup session
+        if let first = results.first {
+            activeRunnerSessionId[worktreeId] = first.id
+        }
+        return results
+    }
+
+    /// Removes only setup sessions for a worktree, preserving config runner sessions.
+    public func removeSetupSessions(forWorktree worktreeId: String) {
+        let toRemove = sessions.values.filter { $0.worktreeId == worktreeId && SessionID.isSetup($0.id) }
+        for session in toRemove {
+            session.terminalView?.terminate()
+            session.terminalView = nil
+            sessions.removeValue(forKey: session.id)
+        }
+        // If the active runner was a setup session, clear it so a remaining runner can be selected
+        if let activeId = activeRunnerSessionId[worktreeId], SessionID.isSetup(activeId) {
+            let remaining = runnerSessions(forWorktree: worktreeId)
+            activeRunnerSessionId[worktreeId] = remaining.first?.id
+        }
     }
 
     /// Updates session state based on process exit code.

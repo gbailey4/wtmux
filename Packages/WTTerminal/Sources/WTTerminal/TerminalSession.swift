@@ -29,8 +29,13 @@ public enum SessionID {
     }
 
     /// Build an ID for a setup runner session.
-    public static func setup(worktreeId: String) -> String {
-        "\(runnerPrefix)\(worktreeId)-setup"
+    public static func setup(worktreeId: String, index: Int) -> String {
+        "\(runnerPrefix)\(worktreeId)-setup-\(index)"
+    }
+
+    /// Whether the given session ID represents a setup session.
+    public static func isSetup(_ id: String) -> Bool {
+        id.contains("-setup-")
     }
 
     /// Whether the given session ID represents a runner session.
