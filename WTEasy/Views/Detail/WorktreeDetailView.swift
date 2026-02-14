@@ -20,6 +20,7 @@ struct WorktreeDetailView: View {
     @State private var conflictingPorts: [Int] = []
     @State private var showCloseTabAlert = false
     @State private var pendingCloseSessionId: String?
+    @State private var showSetupBanner = false
 
     private var currentTheme: TerminalTheme {
         TerminalThemes.theme(forId: terminalThemeId)
@@ -73,6 +74,41 @@ struct WorktreeDetailView: View {
             ZStack {
                 // Center: Main terminal tabs + runner terminals
                 VStack(spacing: 0) {
+                    // Setup banner (inline, no safeAreaInset)
+                    if showSetupBanner, let commands = worktree.project?.profile?.setupCommands,
+                       !commands.filter({ !$0.isEmpty }).isEmpty {
+                        HStack(spacing: 12) {
+                            Image(systemName: "hammer.fill")
+                                .foregroundStyle(.blue)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Setup Available")
+                                    .font(.subheadline.bold())
+                                Text(commands.joined(separator: " && "))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Button("Run Setup") {
+                                showSetupBanner = false
+                                runSetup()
+                            }
+                            .controlSize(.small)
+                            .buttonStyle(.borderedProminent)
+                            Button {
+                                showSetupBanner = false
+                                worktree.needsSetup = false
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.subheadline)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(10)
+                        .background(.blue.opacity(0.1))
+                        Divider()
+                    }
+
                     // Main terminal with tabs
                     tabbedTerminalView
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -113,7 +149,7 @@ struct WorktreeDetailView: View {
         .task(id: worktreeId) {
             activeDiffFile = nil
             changedFileCount = 0
-            await ensureFirstTab()
+            ensureFirstTab()
             if showRunnerPanel && hasRunConfigurations {
                 ensureRunnerSessions()
             }
@@ -154,7 +190,7 @@ struct WorktreeDetailView: View {
                     showRunnerPanel.toggle()
                     if showRunnerPanel {
                         ensureRunnerSessions()
-                        launchAutoStartRunners()
+                        launchRunners()
                     }
                 } label: {
                     Image(systemName: "play.rectangle")
@@ -163,42 +199,25 @@ struct WorktreeDetailView: View {
                 .help("Toggle Runner Panel (Cmd+Shift+R)")
             }
         }
-    }
-
-    private func ensureFirstTab() async {
-        guard terminalSessionManager.sessions(forWorktree: worktreeId).isEmpty else { return }
-
-        // Load config for start command and (optionally) setup commands
-        var startCommand: String?
-        if let repoPath = worktree.project?.repoPath {
-            let applicator = ProfileApplicator()
-            if let config = await applicator.loadConfig(forRepo: repoPath) {
-                // Run setup commands in the runner panel on first creation
-                if worktree.needsSetup == true {
-                    let commands = config.setupCommands.filter { !$0.isEmpty }
-                    if !commands.isEmpty {
-                        let setupCommand = commands.joined(separator: " && ")
-                        let session = terminalSessionManager.createSetupSession(
-                            worktreeId: worktreeId,
-                            workingDirectory: worktree.path,
-                            command: setupCommand
-                        )
-                        session.onProcessExit = { [weak terminalSessionManager] sessionId, exitCode in
-                            terminalSessionManager?.handleProcessExit(sessionId: sessionId, exitCode: exitCode)
-                        }
-                        showRunnerPanel = true
-                    }
-                }
-
-                if let cmd = config.terminalStartCommand, !cmd.isEmpty {
-                    startCommand = cmd
-                }
+        .onChange(of: worktree.needsSetup) { _, newValue in
+            if newValue == true {
+                showSetupBanner = true
             }
         }
+    }
 
+    private func ensureFirstTab() {
+        guard terminalSessionManager.sessions(forWorktree: worktreeId).isEmpty else { return }
+
+        // Run setup commands in the runner panel on first creation
         if worktree.needsSetup == true {
-            worktree.needsSetup = false
+            runSetup()
         }
+
+        let startCommand: String? = {
+            guard let cmd = worktree.project?.profile?.terminalStartCommand, !cmd.isEmpty else { return nil }
+            return cmd
+        }()
 
         // Create the main terminal tab with optional start command
         _ = terminalSessionManager.createTab(
@@ -206,6 +225,23 @@ struct WorktreeDetailView: View {
             workingDirectory: worktree.path,
             initialCommand: startCommand
         )
+    }
+
+    private func runSetup() {
+        let commands = (worktree.project?.profile?.setupCommands ?? []).filter { !$0.isEmpty }
+        guard !commands.isEmpty else { return }
+        let setupCommand = commands.joined(separator: " && ")
+        let session = terminalSessionManager.createSetupSession(
+            worktreeId: worktreeId,
+            workingDirectory: worktree.path,
+            command: setupCommand
+        )
+        session.onProcessExit = { [weak terminalSessionManager] sessionId, exitCode in
+            terminalSessionManager?.handleProcessExit(sessionId: sessionId, exitCode: exitCode)
+        }
+        worktree.needsSetup = false
+        showRunnerPanel = true
+        ensureRunnerSessions()
     }
 
     // MARK: - Open In Editor
@@ -281,25 +317,9 @@ struct WorktreeDetailView: View {
 
     private func launchRunners() {
         ensureRunnerSessions()
-        for config in runConfigurations where !config.command.isEmpty {
+        let defaultConfigs = runConfigurations.filter { $0.autoStart && !$0.command.isEmpty }
+        for config in defaultConfigs {
             let sessionId = SessionID.runner(worktreeId: worktreeId, name: config.name)
-            terminalSessionManager.startSession(id: sessionId)
-        }
-    }
-
-    private func launchAutoStartRunners() {
-        let autoStartConfigs = runConfigurations.filter { $0.autoStart && !$0.command.isEmpty }
-        guard !autoStartConfigs.isEmpty else { return }
-        // Check for conflicts before launching
-        if let conflict = conflictingWorktree() {
-            conflictingWorktreeName = conflict.name
-            conflictingPorts = conflictingPortList()
-            showRunnerConflictAlert = true
-            return
-        }
-        for config in autoStartConfigs {
-            let sessionId = SessionID.runner(worktreeId: worktreeId, name: config.name)
-            ensureRunnerSession(config: config)
             terminalSessionManager.startSession(id: sessionId)
         }
     }
@@ -354,21 +374,15 @@ struct WorktreeDetailView: View {
     // MARK: - Tabbed Terminal
 
     private func createNewTerminalTab() {
-        Task {
-            var startCommand: String?
-            if let repoPath = worktree.project?.repoPath {
-                let applicator = ProfileApplicator()
-                if let config = await applicator.loadConfig(forRepo: repoPath),
-                   let cmd = config.terminalStartCommand, !cmd.isEmpty {
-                    startCommand = cmd
-                }
-            }
-            _ = terminalSessionManager.createTab(
-                forWorktree: worktreeId,
-                workingDirectory: worktree.path,
-                initialCommand: startCommand
-            )
-        }
+        let startCommand: String? = {
+            guard let cmd = worktree.project?.profile?.terminalStartCommand, !cmd.isEmpty else { return nil }
+            return cmd
+        }()
+        _ = terminalSessionManager.createTab(
+            forWorktree: worktreeId,
+            workingDirectory: worktree.path,
+            initialCommand: startCommand
+        )
     }
 
     @ViewBuilder
@@ -437,7 +451,7 @@ struct WorktreeDetailView: View {
                 Button {
                     showRunnerPanel = true
                     ensureRunnerSessions()
-                    launchAutoStartRunners()
+                    launchRunners()
                 }                 label: {
                     Image(systemName: "play.fill")
                         .font(.subheadline)
@@ -541,7 +555,9 @@ struct WorktreeDetailView: View {
     @ViewBuilder
     private var runnerTabBar: some View {
         let _ = terminalSessionManager.runnerStateVersion
-        let hasIdleSessions = configRunnerTabs.contains { $0.deferExecution }
+        let hasIdleDefaultSessions = configRunnerTabs.contains { session in
+            session.deferExecution && (runConfiguration(for: session)?.autoStart ?? true)
+        }
         let hasStartedSessions = configRunnerTabs.contains { !$0.deferExecution }
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -554,22 +570,22 @@ struct WorktreeDetailView: View {
 
             Spacer()
 
-            if hasIdleSessions {
-                // Start All idle sessions
+            if hasIdleDefaultSessions {
+                // Start default runners
                 Button {
                     startRunners()
                 }                 label: {
                     HStack(spacing: 3) {
                         Image(systemName: "play.fill")
                             .font(.system(size: 11))
-                        Text("Start All")
+                        Text("Start Default")
                             .font(.subheadline)
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
                 }
                 .buttonStyle(.plain)
-                .help("Start All Runners")
+                .help("Start Default Runners")
             }
 
             if hasStartedSessions {
@@ -732,7 +748,12 @@ struct WorktreeDetailView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
+        .opacity(isDefaultRunner(session) ? 1.0 : 0.6)
         .background(session.id == activeRunnerTabId ? Color.accentColor.opacity(0.2) : Color.clear)
+    }
+
+    private func isDefaultRunner(_ session: TerminalSession) -> Bool {
+        runConfiguration(for: session)?.autoStart ?? true
     }
 
     // MARK: - Runner Status Bar
@@ -744,7 +765,7 @@ struct WorktreeDetailView: View {
             showRunnerPanel = true
             ensureRunnerSessions()
             if configRunnerTabs.isEmpty {
-                launchAutoStartRunners()
+                launchRunners()
             }
         } label: {
             HStack(spacing: 6) {
@@ -821,8 +842,15 @@ struct WorktreeDetailView: View {
     }
 
     private var runConfigSummaryText: String {
-        let count = worktree.project?.profile?.runConfigurations.count ?? 0
-        return "\(count) runner\(count == 1 ? "" : "s") available"
+        let configs = worktree.project?.profile?.runConfigurations ?? []
+        let defaultCount = configs.filter(\.autoStart).count
+        let optionalCount = configs.count - defaultCount
+        if defaultCount > 0 && optionalCount > 0 {
+            return "\(defaultCount) default + \(optionalCount) optional"
+        } else if optionalCount > 0 {
+            return "\(optionalCount) optional runner\(optionalCount == 1 ? "" : "s")"
+        }
+        return "\(configs.count) runner\(configs.count == 1 ? "" : "s") available"
     }
 
     private func runConfiguration(for session: TerminalSession) -> RunConfiguration? {

@@ -93,11 +93,11 @@ struct CreateWorktreeView: View {
                 )
 
                 // Apply profile: copy env files from main repo to new worktree
-                let applicator = ProfileApplicator()
-                let config = await applicator.loadConfig(forRepo: project.repoPath)
-                if let config {
+                let envFiles = project.profile?.envFilesToCopy ?? []
+                if !envFiles.isEmpty {
+                    let applicator = ProfileApplicator()
                     applicator.applyEnvFiles(
-                        config: config,
+                        envFiles: envFiles,
                         repoPath: project.repoPath,
                         worktreePath: worktreePath
                     )
@@ -109,7 +109,7 @@ struct CreateWorktreeView: View {
                     baseBranch: baseBranch,
                     status: .ready
                 )
-                if let config, !config.setupCommands.isEmpty {
+                if !(project.profile?.setupCommands ?? []).isEmpty {
                     worktree.needsSetup = true
                 }
                 worktree.project = project

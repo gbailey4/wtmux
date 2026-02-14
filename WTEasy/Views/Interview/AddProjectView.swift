@@ -32,6 +32,7 @@ struct AddProjectView: View {
     @State private var selectedEnvFiles: Set<String> = []
     @State private var setupCommands: [String] = []
     @State private var terminalStartCommand = ""
+    @State private var startClaudeInTerminals = false
     @State private var runConfigurations: [EditableRunConfig] = []
 
     // Existing worktrees
@@ -281,13 +282,16 @@ struct AddProjectView: View {
             }
 
             Section("Terminal") {
-                TextField("Start Command", text: $terminalStartCommand)
-                    .textFieldStyle(.roundedBorder)
-                    .multilineTextAlignment(.leading)
-                    .font(.system(.body, design: .monospaced))
-                Text("Runs automatically in every new terminal tab (e.g. `claude`)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Toggle("Start Claude in new terminals", isOn: $startClaudeInTerminals)
+                if !startClaudeInTerminals {
+                    TextField("Start Command", text: $terminalStartCommand)
+                        .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.leading)
+                        .font(.system(.body, design: .monospaced))
+                    Text("Runs automatically in every new terminal tab")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("Run Configurations") {
@@ -313,7 +317,7 @@ struct AddProjectView: View {
                                 .textFieldStyle(.roundedBorder)
                                 .multilineTextAlignment(.leading)
                                 .frame(width: 80)
-                            Toggle("Auto-start", isOn: $runConfigurations[index].autoStart)
+                            Toggle("Default runner", isOn: $runConfigurations[index].autoStart)
                         }
                     }
                     .labelsHidden()
@@ -428,9 +432,9 @@ struct AddProjectView: View {
                 }
             }
 
-            if !terminalStartCommand.isEmpty {
+            if startClaudeInTerminals || !terminalStartCommand.isEmpty {
                 Section("Terminal Start Command") {
-                    Text(terminalStartCommand)
+                    Text(startClaudeInTerminals ? "claude" : terminalStartCommand)
                         .font(.system(.body, design: .monospaced))
                 }
             }
@@ -588,7 +592,12 @@ struct AddProjectView: View {
         detectedEnvFiles = analysis.envFilesToCopy
         selectedEnvFiles = Set(analysis.envFilesToCopy)
         setupCommands = analysis.setupCommands
-        terminalStartCommand = analysis.terminalStartCommand ?? ""
+        if analysis.terminalStartCommand == "claude" {
+            startClaudeInTerminals = true
+            terminalStartCommand = ""
+        } else {
+            terminalStartCommand = analysis.terminalStartCommand ?? ""
+        }
         runConfigurations = analysis.toEditableRunConfigs()
     }
 
@@ -707,7 +716,7 @@ struct AddProjectView: View {
         let profile = project.profile ?? ProjectProfile()
         profile.envFilesToCopy = Array(selectedEnvFiles)
         profile.setupCommands = setupCommands.filter { !$0.isEmpty }
-        profile.terminalStartCommand = terminalStartCommand.isEmpty ? nil : terminalStartCommand
+        profile.terminalStartCommand = startClaudeInTerminals ? "claude" : (terminalStartCommand.isEmpty ? nil : terminalStartCommand)
 
         // Clear existing run configurations before adding new ones
         for rc in profile.runConfigurations {
@@ -753,7 +762,7 @@ struct AddProjectView: View {
         // Write .wteasy/config.json and update .gitignore
         Task {
             let configService = ConfigService()
-            let startCmd = terminalStartCommand.isEmpty ? nil : terminalStartCommand
+            let startCmd: String? = startClaudeInTerminals ? "claude" : (terminalStartCommand.isEmpty ? nil : terminalStartCommand)
             let config = ProjectConfig(
                 envFilesToCopy: Array(selectedEnvFiles),
                 setupCommands: setupCommands.filter { !$0.isEmpty },
@@ -871,7 +880,7 @@ struct AIAnalysisPreviewSheet: View {
                                             .font(.caption)
                                     }
                                     if rc.autoStart {
-                                        Text("Auto-start")
+                                        Text("Default")
                                             .font(.caption)
                                             .padding(.horizontal, 6)
                                             .padding(.vertical, 2)

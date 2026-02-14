@@ -4,23 +4,16 @@ import os.log
 private let logger = Logger(subsystem: "com.wteasy", category: "ProfileApplicator")
 
 public final class ProfileApplicator: Sendable {
-    private let configService = ConfigService()
-
     public init() {}
 
-    /// Loads the project config from `.wteasy/config.json`.
-    public func loadConfig(forRepo repoPath: String) async -> ProjectConfig? {
-        await configService.readConfig(forRepo: repoPath)
-    }
-
-    /// Copies env files listed in the config from the main repo to a worktree directory.
+    /// Copies env files from the main repo to a worktree directory.
     public func applyEnvFiles(
-        config: ProjectConfig,
+        envFiles: [String],
         repoPath: String,
         worktreePath: String
     ) {
         let fm = FileManager.default
-        for envFile in config.envFilesToCopy {
+        for envFile in envFiles {
             let source = URL(fileURLWithPath: repoPath)
                 .appendingPathComponent(envFile)
             let destination = URL(fileURLWithPath: worktreePath)

@@ -11,7 +11,8 @@ public enum PromptBuilder {
         - Only suggest setup commands you are confident are correct for the project
         - Only suggest run configurations for scripts/commands you can see defined
         - For ports, only include a port number if you can determine it from the config
-        - Set autoStart to true only for the primary dev server
+        - Set autoStart to true for default runners (included in batch start and auto-launched \
+        when the runner panel opens). Set to false for optional runners that the user starts individually.
 
         Common patterns:
         - Node.js: look at package.json scripts for dev/start/build commands and the package manager lock file
@@ -76,7 +77,7 @@ public enum PromptBuilder {
                             ],
                             "autoStart": [
                                 "type": "boolean",
-                                "description": "Whether to auto-start this in new worktrees"
+                                "description": "Whether this is a default runner (included in batch start and auto-launched when the runner panel opens). Optional runners (false) must be started individually."
                             ]
                         ],
                         "required": ["name", "command", "autoStart"]

@@ -70,6 +70,15 @@ public struct ProjectImportService {
                 profile.setupCommands = config.setupCommands
                 profile.terminalStartCommand = config.terminalStartCommand
 
+                // Mark all worktrees for setup when new setup commands arrive
+                if !config.setupCommands.isEmpty {
+                    for worktree in project.worktrees {
+                        if worktree.needsSetup != true {
+                            worktree.needsSetup = true
+                        }
+                    }
+                }
+
                 // Replace run configurations
                 for rc in profile.runConfigurations {
                     modelContext.delete(rc)

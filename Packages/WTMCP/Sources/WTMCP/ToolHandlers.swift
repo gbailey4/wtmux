@@ -81,7 +81,7 @@ struct ToolHandlers: Sendable {
                                 "autoStart": .object([
                                     "type": .string("boolean"),
                                     "description": .string(
-                                        "Whether to start automatically when the worktree is opened"
+                                        "Whether this is a default runner (included in Start Default and auto-launched when the runner panel opens). Optional runners (false) must be started individually."
                                     ),
                                 ]),
                                 "order": .object([
@@ -99,6 +99,12 @@ struct ToolHandlers: Sendable {
                         "type": .string("string"),
                         "description": .string(
                             "Command to run when opening a new terminal in a worktree"
+                        ),
+                    ]),
+                    "startClaudeInTerminals": .object([
+                        "type": .string("boolean"),
+                        "description": .string(
+                            "If true, automatically start Claude Code in new terminal tabs. Sets terminalStartCommand to 'claude'."
                         ),
                     ]),
                     "projectName": .object([
@@ -183,7 +189,12 @@ struct ToolHandlers: Sendable {
 
         let envFiles = arguments?["envFilesToCopy"]?.arrayValue?.compactMap(\.stringValue) ?? []
         let setupCommands = arguments?["setupCommands"]?.arrayValue?.compactMap(\.stringValue) ?? []
-        let terminalStartCommand = arguments?["terminalStartCommand"]?.stringValue
+        let terminalStartCommand: String? = {
+            if arguments?["startClaudeInTerminals"]?.boolValue == true {
+                return "claude"
+            }
+            return arguments?["terminalStartCommand"]?.stringValue
+        }()
         let projectName = arguments?["projectName"]?.stringValue
         let defaultBranch = arguments?["defaultBranch"]?.stringValue
         let worktreeBasePath = arguments?["worktreeBasePath"]?.stringValue
@@ -239,10 +250,18 @@ struct ToolHandlers: Sendable {
 
         // Notify the running WTEasy app to import the project via
         // DistributedNotificationCenter (cross-process, no window side-effects).
+        // Pass the config inline so the app doesn't need to read config.json.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        var userInfo: [String: String] = [:]
+        if let data = try? encoder.encode(config),
+           let json = String(data: data, encoding: .utf8) {
+            userInfo["config"] = json
+        }
         DistributedNotificationCenter.default().postNotificationName(
             .init("com.grahampark.wteasy.importProject"),
             object: repoPath,
-            userInfo: nil,
+            userInfo: userInfo,
             deliverImmediately: true
         )
 
@@ -260,7 +279,7 @@ struct ToolHandlers: Sendable {
             summary += "- Run configurations: \(runConfigs.count)\n"
             for rc in runConfigs {
                 let portStr = rc.port.map { " (port \($0))" } ?? ""
-                let autoStr = rc.autoStart ? " [auto-start]" : ""
+                let autoStr = rc.autoStart ? " [default]" : " [optional]"
                 summary += "    \(rc.name): \(rc.command)\(portStr)\(autoStr)\n"
             }
         }

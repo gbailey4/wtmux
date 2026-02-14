@@ -25,6 +25,7 @@ struct ProjectSettingsView: View {
     @State private var setupCommands: [String]
     @State private var envFilesToCopy: [String]
     @State private var terminalStartCommand: String
+    @State private var startClaudeInTerminals: Bool
 
     // AI analysis
     @AppStorage("llmModel") private var llmModel = "claude-sonnet-4-5-20250929"
@@ -46,6 +47,7 @@ struct ProjectSettingsView: View {
         _setupCommands = State(initialValue: profile?.setupCommands ?? [])
         _envFilesToCopy = State(initialValue: profile?.envFilesToCopy ?? [])
         _terminalStartCommand = State(initialValue: profile?.terminalStartCommand ?? "")
+        _startClaudeInTerminals = State(initialValue: profile?.terminalStartCommand == "claude")
         _runConfigurations = State(initialValue: (profile?.runConfigurations ?? [])
             .sorted { $0.order < $1.order }
             .map { EditableRunConfig(
@@ -61,7 +63,11 @@ struct ProjectSettingsView: View {
         VStack(spacing: 0) {
             Form {
                 Section {
-                    reanalyzeButton
+                    HStack {
+                        reanalyzeButton
+                        Spacer()
+                        reloadFromFileButton
+                    }
                 }
 
                 Section("Repository") {
@@ -177,15 +183,18 @@ struct ProjectSettingsView: View {
                 }
 
                 Section("Terminal") {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Start Command")
-                            .foregroundStyle(.secondary)
-                        TextField("", text: $terminalStartCommand)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.body, design: .monospaced))
-                        Text("Runs automatically in every new terminal tab (e.g. `claude`)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    Toggle("Start Claude in new terminals", isOn: $startClaudeInTerminals)
+                    if !startClaudeInTerminals {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Start Command")
+                                .foregroundStyle(.secondary)
+                            TextField("", text: $terminalStartCommand)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.body, design: .monospaced))
+                            Text("Runs automatically in every new terminal tab")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -226,7 +235,7 @@ struct ProjectSettingsView: View {
                                 }
                                 HStack {
                                     Toggle("", isOn: $runConfigurations[index].autoStart)
-                                    Text("Auto-start")
+                                    Text("Default runner")
                                 }
                             }
                         }
@@ -259,23 +268,6 @@ struct ProjectSettingsView: View {
             .padding()
         }
         .frame(width: 550, height: 600)
-        .task {
-            // Load from .wteasy/config.json if available (source of truth over SwiftData)
-            let configService = ConfigService()
-            if let config = await configService.readConfig(forRepo: project.repoPath) {
-                envFilesToCopy = config.envFilesToCopy
-                setupCommands = config.setupCommands
-                terminalStartCommand = config.terminalStartCommand ?? ""
-                runConfigurations = config.runConfigurations.map { rc in
-                    EditableRunConfig(
-                        name: rc.name,
-                        command: rc.command,
-                        portString: rc.port.map(String.init) ?? "",
-                        autoStart: rc.autoStart
-                    )
-                }
-            }
-        }
         .sheet(isPresented: $analysisManager.showAnalysisPreview) {
             if let analysis = analysisManager.pendingAnalysis {
                 AIAnalysisPreviewSheet(analysis: analysis) {
@@ -371,10 +363,46 @@ struct ProjectSettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var reloadFromFileButton: some View {
+        Button {
+            Task {
+                let configService = ConfigService()
+                if let config = await configService.readConfig(forRepo: repoPath) {
+                    envFilesToCopy = config.envFilesToCopy
+                    setupCommands = config.setupCommands
+                    if config.terminalStartCommand == "claude" {
+                        startClaudeInTerminals = true
+                        terminalStartCommand = ""
+                    } else {
+                        startClaudeInTerminals = false
+                        terminalStartCommand = config.terminalStartCommand ?? ""
+                    }
+                    runConfigurations = config.runConfigurations.map { rc in
+                        EditableRunConfig(
+                            name: rc.name,
+                            command: rc.command,
+                            portString: rc.port.map(String.init) ?? "",
+                            autoStart: rc.autoStart
+                        )
+                    }
+                }
+            }
+        } label: {
+            Label("Reload from File", systemImage: "arrow.clockwise")
+        }
+    }
+
     private func applyAnalysis(_ analysis: ProjectAnalysis) {
         envFilesToCopy = analysis.envFilesToCopy
         setupCommands = analysis.setupCommands
-        terminalStartCommand = analysis.terminalStartCommand ?? ""
+        if analysis.terminalStartCommand == "claude" {
+            startClaudeInTerminals = true
+            terminalStartCommand = ""
+        } else {
+            startClaudeInTerminals = false
+            terminalStartCommand = analysis.terminalStartCommand ?? ""
+        }
         runConfigurations = analysis.toEditableRunConfigs()
     }
 
@@ -404,7 +432,7 @@ struct ProjectSettingsView: View {
 
         profile.envFilesToCopy = envFilesToCopy.filter { !$0.isEmpty }
         profile.setupCommands = setupCommands.filter { !$0.isEmpty }
-        profile.terminalStartCommand = terminalStartCommand.isEmpty ? nil : terminalStartCommand
+        profile.terminalStartCommand = startClaudeInTerminals ? "claude" : (terminalStartCommand.isEmpty ? nil : terminalStartCommand)
 
         // Remove old run configurations
         for existing in profile.runConfigurations {
@@ -428,7 +456,7 @@ struct ProjectSettingsView: View {
         // Write .wteasy/config.json
         Task {
             let configService = ConfigService()
-            let startCmd = terminalStartCommand.isEmpty ? nil : terminalStartCommand
+            let startCmd: String? = startClaudeInTerminals ? "claude" : (terminalStartCommand.isEmpty ? nil : terminalStartCommand)
             let config = ProjectConfig(
                 envFilesToCopy: envFilesToCopy.filter { !$0.isEmpty },
                 setupCommands: setupCommands.filter { !$0.isEmpty },

@@ -9,6 +9,7 @@ import WTTransport
 @MainActor @Observable
 final class ProjectImportObserver {
     var pendingImportPath: String?
+    var pendingImportConfig: ProjectConfig?
 
     init() {
         DistributedNotificationCenter.default().addObserver(
@@ -17,7 +18,13 @@ final class ProjectImportObserver {
             queue: .main
         ) { [weak self] notification in
             let path = notification.object as? String
+            let config: ProjectConfig? = {
+                guard let json = (notification.userInfo as? [String: Any])?["config"] as? String,
+                      let data = json.data(using: .utf8) else { return nil }
+                return try? JSONDecoder().decode(ProjectConfig.self, from: data)
+            }()
             MainActor.assumeIsolated {
+                self?.pendingImportConfig = config
                 self?.pendingImportPath = path
             }
         }
@@ -138,8 +145,10 @@ struct ContentView: View {
         }
         .onChange(of: importObserver.pendingImportPath) { _, newPath in
             guard let repoPath = newPath, !repoPath.isEmpty else { return }
+            let config = importObserver.pendingImportConfig
             importObserver.pendingImportPath = nil
-            importProject(repoPath: repoPath)
+            importObserver.pendingImportConfig = nil
+            importProject(repoPath: repoPath, config: config)
         }
         .task { registerWorktreePaths() }
         .onChange(of: projects) { registerWorktreePaths() }
@@ -167,12 +176,17 @@ struct ContentView: View {
         importProject(repoPath: repoPath)
     }
 
-    private func importProject(repoPath: String) {
+    private func importProject(repoPath: String, config: ProjectConfig? = nil) {
         Task {
-            let configService = ConfigService()
-            let config = await configService.readConfig(forRepo: repoPath) ?? ProjectConfig()
+            let resolvedConfig: ProjectConfig
+            if let config {
+                resolvedConfig = config
+            } else {
+                let configService = ConfigService()
+                resolvedConfig = await configService.readConfig(forRepo: repoPath) ?? ProjectConfig()
+            }
             let importService = ProjectImportService()
-            importService.importProject(repoPath: repoPath, config: config, in: modelContext)
+            importService.importProject(repoPath: repoPath, config: resolvedConfig, in: modelContext)
         }
     }
 
