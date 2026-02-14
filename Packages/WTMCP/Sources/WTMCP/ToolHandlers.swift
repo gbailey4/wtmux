@@ -25,11 +25,11 @@ struct ToolHandlers: Sendable {
         Tool(
             name: "configure_project",
             description: """
-                Configure a project for WTEasy by writing .wteasy/config.json \
+                Configure a project for WTMux by writing .wtmux/config.json \
                 and importing it into the app. Provide setup commands (e.g. npm install), \
                 run configurations (dev servers, watchers), env files to copy between \
                 worktrees, and an optional terminal start command. The project will \
-                automatically appear in WTEasy's sidebar.
+                automatically appear in WTMux's sidebar.
                 """,
             inputSchema: .object([
                 "type": .string("object"),
@@ -135,7 +135,7 @@ struct ToolHandlers: Sendable {
         Tool(
             name: "get_project_config",
             description: """
-                Read the current .wteasy/config.json for a project. Returns the \
+                Read the current .wtmux/config.json for a project. Returns the \
                 configuration if it exists, or a message indicating the project is not \
                 yet configured.
                 """,
@@ -303,7 +303,7 @@ struct ToolHandlers: Sendable {
             )
         }
 
-        // Notify the running WTEasy app to import the project via
+        // Notify the running WTMux app to import the project via
         // DistributedNotificationCenter (cross-process, no window side-effects).
         // Pass the config inline so the app doesn't need to read config.json.
         let encoder = JSONEncoder()
@@ -314,7 +314,7 @@ struct ToolHandlers: Sendable {
             userInfo["config"] = json
         }
         DistributedNotificationCenter.default().postNotificationName(
-            .init("com.grahampark.wteasy.importProject"),
+            .init("com.grahampark.wtmux.importProject"),
             object: repoPath,
             userInfo: userInfo,
             deliverImmediately: true
@@ -341,7 +341,7 @@ struct ToolHandlers: Sendable {
         if let cmd = terminalStartCommand {
             summary += "- Terminal start command: \(cmd)\n"
         }
-        summary += "\n.wteasy/config.json written, .gitignore updated, and project imported into WTEasy."
+        summary += "\n.wtmux/config.json written, .gitignore updated, and project imported into WTMux."
 
         return .init(content: [.text(summary)])
     }
@@ -361,7 +361,7 @@ struct ToolHandlers: Sendable {
 
         guard let config else {
             return .init(content: [.text(
-                "No .wteasy/config.json found at \(repoPath). Project is not yet configured for WTEasy."
+                "No .wtmux/config.json found at \(repoPath). Project is not yet configured for WTMux."
             )])
         }
 

@@ -1,4 +1,4 @@
-name: WTEasy
+name: WTMux
 options:
   bundleIdPrefix: com.grahampark
   deploymentTarget:
@@ -24,14 +24,14 @@ packages:
     path: Packages/WTLLM
 
 targets:
-  WTEasy:
+  WTMux:
     type: application
     platform: macOS
     sources:
-      - path: WTEasy
+      - path: WTMux
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.grahampark.wteasy
+        PRODUCT_BUNDLE_IDENTIFIER: com.grahampark.wtmux
         MARKETING_VERSION: 0.1.0
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: 6.0
@@ -57,10 +57,10 @@ targets:
       - package: WTDiff
       - package: WTLLM
     info:
-      path: WTEasy/Info.plist
+      path: WTMux/Info.plist
       properties:
-        CFBundleName: WTEasy
-        CFBundleDisplayName: WTEasy
+        CFBundleName: WTMux
+        CFBundleDisplayName: WTMux
         CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleShortVersionString: $(MARKETING_VERSION)
@@ -68,15 +68,15 @@ targets:
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         LSApplicationCategoryType: public.app-category.developer-tools
         CFBundleURLTypes:
-          - CFBundleURLName: com.grahampark.wteasy
+          - CFBundleURLName: com.grahampark.wtmux
             CFBundleURLSchemes:
-              - wteasy
+              - wtmux
     entitlements:
-      path: WTEasy/WTEasy.entitlements
+      path: WTMux/WTMux.entitlements
       properties:
         com.apple.security.app-sandbox: false
     postBuildScripts:
-      - name: "Build and embed wteasy-mcp"
+      - name: "Build and embed wtmux-mcp"
         basedOnDependencyAnalysis: false
         script: |
           if [ "$CONFIGURATION" = "Release" ]; then
@@ -85,9 +85,9 @@ targets:
             SWIFT_CONFIG="debug"
           fi
           swift build --package-path "$SRCROOT/Packages/WTMCP" -c $SWIFT_CONFIG 2>&1
-          cp -f "$SRCROOT/Packages/WTMCP/.build/$SWIFT_CONFIG/wteasy-mcp" "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/wteasy-mcp"
-          codesign --force --sign - "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/wteasy-mcp"
-      - name: "Build and embed wteasy-hook"
+          cp -f "$SRCROOT/Packages/WTMCP/.build/$SWIFT_CONFIG/wtmux-mcp" "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/wtmux-mcp"
+          codesign --force --sign - "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/wtmux-mcp"
+      - name: "Build and embed wtmux-hook"
         basedOnDependencyAnalysis: false
         script: |
           if [ "$CONFIGURATION" = "Release" ]; then
@@ -96,14 +96,14 @@ targets:
             SWIFT_CONFIG="debug"
           fi
           swift build --package-path "$SRCROOT/Packages/WTHook" -c $SWIFT_CONFIG 2>&1
-          cp -f "$SRCROOT/Packages/WTHook/.build/$SWIFT_CONFIG/wteasy-hook" "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/wteasy-hook"
-          codesign --force --sign - "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/wteasy-hook"
+          cp -f "$SRCROOT/Packages/WTHook/.build/$SWIFT_CONFIG/wtmux-hook" "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/wtmux-hook"
+          codesign --force --sign - "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/wtmux-hook"
 
 schemes:
-  WTEasy:
+  WTMux:
     build:
       targets:
-        WTEasy: all
+        WTMux: all
     run:
       config: Debug
     test:

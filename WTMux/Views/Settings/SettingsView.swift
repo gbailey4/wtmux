@@ -362,9 +362,9 @@ struct SettingsView: View {
     private func mcpBinaryPath() -> String {
         if let execURL = Bundle.main.executableURL {
             return execURL.deletingLastPathComponent()
-                .appendingPathComponent("wteasy-mcp").path
+                .appendingPathComponent("wtmux-mcp").path
         }
-        return "/Applications/WTEasy.app/Contents/MacOS/wteasy-mcp"
+        return "/Applications/WTMux.app/Contents/MacOS/wtmux-mcp"
     }
 
     private func addMCPRegistration(to configURL: URL, includeType: Bool) {
@@ -383,7 +383,7 @@ struct SettingsView: View {
         if includeType {
             entry["type"] = "stdio"
         }
-        mcpServers["wteasy"] = entry
+        mcpServers["wtmux"] = entry
         config["mcpServers"] = mcpServers
 
         if let data = try? JSONSerialization.data(
@@ -400,7 +400,7 @@ struct SettingsView: View {
             return
         }
 
-        mcpServers.removeValue(forKey: "wteasy")
+        mcpServers.removeValue(forKey: "wtmux")
         config["mcpServers"] = mcpServers
 
         if let data = try? JSONSerialization.data(
@@ -416,7 +416,7 @@ struct SettingsView: View {
               let mcpServers = config["mcpServers"] as? [String: Any] else {
             return false
         }
-        return mcpServers["wteasy"] != nil
+        return mcpServers["wtmux"] != nil
     }
 
     // MARK: - Hooks Registration
@@ -424,9 +424,9 @@ struct SettingsView: View {
     private func hookBinaryPath() -> String {
         if let execURL = Bundle.main.executableURL {
             return execURL.deletingLastPathComponent()
-                .appendingPathComponent("wteasy-hook").path
+                .appendingPathComponent("wtmux-hook").path
         }
-        return "/Applications/WTEasy.app/Contents/MacOS/wteasy-hook"
+        return "/Applications/WTMux.app/Contents/MacOS/wtmux-hook"
     }
 
     private func hookEntry() -> [String: Any] {
@@ -452,10 +452,10 @@ struct SettingsView: View {
         // Simple event hooks (no matcher)
         for event in ["Stop", "SessionStart", "SessionEnd", "UserPromptSubmit", "PermissionRequest"] {
             var eventHooks = hooks[event] as? [[String: Any]] ?? []
-            // Remove any existing wteasy-hook entries
+            // Remove any existing wtmux-hook entries
             eventHooks.removeAll { group in
                 guard let innerHooks = group["hooks"] as? [[String: Any]] else { return false }
-                return innerHooks.contains { ($0["command"] as? String)?.contains("wteasy-hook") == true }
+                return innerHooks.contains { ($0["command"] as? String)?.contains("wtmux-hook") == true }
             }
             eventHooks.append(["hooks": [entry]])
             hooks[event] = eventHooks
@@ -465,7 +465,7 @@ struct SettingsView: View {
         var notifHooks = hooks["Notification"] as? [[String: Any]] ?? []
         notifHooks.removeAll { group in
             guard let innerHooks = group["hooks"] as? [[String: Any]] else { return false }
-            return innerHooks.contains { ($0["command"] as? String)?.contains("wteasy-hook") == true }
+            return innerHooks.contains { ($0["command"] as? String)?.contains("wtmux-hook") == true }
         }
         notifHooks.append([
             "matcher": "permission_prompt|idle_prompt|elicitation_dialog",
@@ -496,7 +496,7 @@ struct SettingsView: View {
             guard var eventHooks = hooks[event] as? [[String: Any]] else { continue }
             eventHooks.removeAll { group in
                 guard let innerHooks = group["hooks"] as? [[String: Any]] else { return false }
-                return innerHooks.contains { ($0["command"] as? String)?.contains("wteasy-hook") == true }
+                return innerHooks.contains { ($0["command"] as? String)?.contains("wtmux-hook") == true }
             }
             if eventHooks.isEmpty {
                 hooks.removeValue(forKey: event)
@@ -527,7 +527,7 @@ struct SettingsView: View {
         }
         return stopHooks.contains { group in
             guard let innerHooks = group["hooks"] as? [[String: Any]] else { return false }
-            return innerHooks.contains { ($0["command"] as? String)?.contains("wteasy-hook") == true }
+            return innerHooks.contains { ($0["command"] as? String)?.contains("wtmux-hook") == true }
         }
     }
 }

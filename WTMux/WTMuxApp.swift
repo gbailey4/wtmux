@@ -3,10 +3,10 @@ import SwiftData
 import WTCore
 import os.log
 
-private let logger = Logger(subsystem: "com.wteasy", category: "App")
+private let logger = Logger(subsystem: "com.wtmux", category: "App")
 
 @main
-struct WTEasyApp: App {
+struct WTMuxApp: App {
     let modelContainer: ModelContainer
     private let initError: String?
 
@@ -18,6 +18,7 @@ struct WTEasyApp: App {
                 ProjectProfile.self,
                 RunConfiguration.self,
             ])
+            // Name kept as "WTEasy" for backward compatibility with existing data stores
             let config = ModelConfiguration("WTEasy", isStoredInMemoryOnly: false)
             modelContainer = try ModelContainer(for: schema, configurations: [config])
             initError = nil
@@ -47,7 +48,7 @@ struct WTEasyApp: App {
                         .foregroundStyle(.yellow)
                     Text("Database Error")
                         .font(.title2.bold())
-                    Text("WTEasy could not open its data store. Your data may not be saved.")
+                    Text("WTMux could not open its data store. Your data may not be saved.")
                         .multilineTextAlignment(.center)
                     Text(initError)
                         .font(.caption)

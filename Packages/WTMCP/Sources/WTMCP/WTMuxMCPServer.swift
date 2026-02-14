@@ -2,14 +2,14 @@ import Foundation
 import MCP
 
 @main
-struct WTEasyMCPServer {
+struct WTMuxMCPServer {
     static func main() async throws {
         let server = Server(
-            name: "wteasy",
+            name: "wtmux",
             version: "1.0.0",
             instructions: """
-                WTEasy project configuration server. Use these tools to set up projects \
-                for the WTEasy git worktree manager.
+                WTMux project configuration server. Use these tools to set up projects \
+                for the WTMux git worktree manager.
 
                 ## Workflow
 
@@ -41,7 +41,7 @@ struct WTEasyMCPServer {
                 env files by checking git remote, git ls-files, .gitignore, or any other means.
                 - ALWAYS present findings to the user before calling `configure_project`. \
                 Never configure without user review.
-                - If the project already has a `.wteasy/config.json` (returned in the analysis \
+                - If the project already has a `.wtmux/config.json` (returned in the analysis \
                 as `existingConfig`), show what's currently configured and ask what they'd like \
                 to change rather than starting from scratch.
                 """,

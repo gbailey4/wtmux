@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.wteasy", category: "ProfileApplicator")
+private let logger = Logger(subsystem: "com.wtmux", category: "ProfileApplicator")
 
 public final class ProfileApplicator: Sendable {
     public init() {}

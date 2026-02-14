@@ -8,7 +8,7 @@ import WTTerminal
 import WTTransport
 import os.log
 
-private let logger = Logger(subsystem: "com.wteasy", category: "AddProjectView")
+private let logger = Logger(subsystem: "com.wtmux", category: "AddProjectView")
 
 struct AddProjectView: View {
     @Binding var selectedWorktreeID: String?
@@ -677,7 +677,7 @@ struct AddProjectView: View {
             }
 
             // 4. Pre-create terminal session with claude command
-            let claudeCommand = "claude \"Analyze the repo at \(repoPath) and use the wteasy MCP configure_project tool to configure it. Use \(repoPath) as the repoPath. Determine appropriate setup commands, run configurations (dev servers with ports), env files to copy between worktrees, and terminal start command. Before calling configure_project, present the proposed configuration to the user for review. If they give feedback, incorporate it and present the updated configuration again for approval. Only call configure_project once the user confirms.\""
+            let claudeCommand = "claude \"Analyze the repo at \(repoPath) and use the wtmux MCP configure_project tool to configure it. Use \(repoPath) as the repoPath. Determine appropriate setup commands, run configurations (dev servers with ports), env files to copy between worktrees, and terminal start command. Before calling configure_project, present the proposed configuration to the user for review. If they give feedback, incorporate it and present the updated configuration again for approval. Only call configure_project once the user confirms.\""
             _ = terminalSessionManager.createTab(
                 forWorktree: worktreePath,
                 workingDirectory: worktreePath,
@@ -761,7 +761,7 @@ struct AddProjectView: View {
             logger.error("Failed to save new project '\(projectName)': \(error.localizedDescription)")
         }
 
-        // Write .wteasy/config.json and update .gitignore
+        // Write .wtmux/config.json and update .gitignore
         Task {
             let configService = ConfigService()
             let startCmd: String? = startClaudeInTerminals ? "claude" : (terminalStartCommand.isEmpty ? nil : terminalStartCommand)

@@ -5,7 +5,7 @@ import WTLLM
 import WTTransport
 import os.log
 
-private let logger = Logger(subsystem: "com.wteasy", category: "ProjectSettingsView")
+private let logger = Logger(subsystem: "com.wtmux", category: "ProjectSettingsView")
 
 struct ProjectSettingsView: View {
     @Bindable var project: Project
@@ -507,7 +507,7 @@ struct ProjectSettingsView: View {
             profile.runConfigurations.append(rc)
         }
 
-        // Write .wteasy/config.json
+        // Write .wtmux/config.json
         Task {
             let configService = ConfigService()
             let startCmd: String? = startClaudeInTerminals ? "claude" : (terminalStartCommand.isEmpty ? nil : terminalStartCommand)

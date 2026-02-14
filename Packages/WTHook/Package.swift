@@ -7,7 +7,7 @@ let package = Package(
     platforms: [.macOS(.v15)],
     targets: [
         .executableTarget(
-            name: "wteasy-hook",
+            name: "wtmux-hook",
             path: "Sources/WTHook"
         ),
     ]

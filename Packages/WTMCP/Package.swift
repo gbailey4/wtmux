@@ -11,7 +11,7 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "wteasy-mcp",
+            name: "wtmux-mcp",
             dependencies: [
                 "WTCore",
                 .product(name: "MCP", package: "swift-sdk"),

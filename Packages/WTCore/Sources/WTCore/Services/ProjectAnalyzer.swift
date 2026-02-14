@@ -222,7 +222,7 @@ public enum ProjectAnalyzer {
 
     private static func readExistingConfig(repoPath: String) -> ProjectConfig? {
         let url = URL(fileURLWithPath: repoPath)
-            .appendingPathComponent(".wteasy")
+            .appendingPathComponent(".wtmux")
             .appendingPathComponent("config.json")
         guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(ProjectConfig.self, from: data)

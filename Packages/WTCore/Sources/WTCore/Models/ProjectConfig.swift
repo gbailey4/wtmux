@@ -1,6 +1,6 @@
 import Foundation
 
-/// Codable model for `.wteasy/config.json` stored in the managed repo.
+/// Codable model for `.wtmux/config.json` stored in the managed repo.
 public struct ProjectConfig: Codable, Sendable {
     public var envFilesToCopy: [String]
     public var setupCommands: [String]

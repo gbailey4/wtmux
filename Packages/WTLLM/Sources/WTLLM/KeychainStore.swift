@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 public enum KeychainStore {
-    private static let service = "com.grahampark.wteasy.llm"
+    private static let service = "com.grahampark.wtmux.llm"
 
     public static func saveAPIKey(_ key: String, for provider: LLMProviderKind) throws {
         let account = provider.rawValue

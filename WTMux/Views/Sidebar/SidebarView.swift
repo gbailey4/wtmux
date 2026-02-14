@@ -7,7 +7,7 @@ import WTTerminal
 import WTTransport
 import os.log
 
-private let logger = Logger(subsystem: "com.wteasy", category: "SidebarView")
+private let logger = Logger(subsystem: "com.wtmux", category: "SidebarView")
 
 struct SidebarView: View {
     let projects: [Project]
@@ -679,7 +679,7 @@ struct DeleteProjectSheet: View {
                 .font(.headline)
 
             if worktreeCount > 0 {
-                Text("This project has \(worktreeCount) worktree\(worktreeCount == 1 ? "" : "s"). You can remove all worktrees from disk or just remove the project from WTEasy.")
+                Text("This project has \(worktreeCount) worktree\(worktreeCount == 1 ? "" : "s"). You can remove all worktrees from disk or just remove the project from WTMux.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -687,7 +687,7 @@ struct DeleteProjectSheet: View {
                 Toggle("Also delete worktree branches", isOn: $deleteBranches)
                     .padding(.horizontal)
             } else {
-                Text("This will remove the project from WTEasy.")
+                Text("This will remove the project from WTMux.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
             }

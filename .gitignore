@@ -5,7 +5,7 @@ xcuserdata/
 DerivedData/
 
 # XcodeGen - generated project can be regenerated
-WTEasy.xcodeproj/
+WTMux.xcodeproj/
 
 # SPM
 .build/
@@ -20,4 +20,4 @@ buildServer.json
 
 # Claude Code local settings
 .claude/settings.local.json
-.wteasy
+.wtmux

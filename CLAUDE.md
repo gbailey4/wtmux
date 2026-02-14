@@ -13,7 +13,7 @@ xcodegen generate
 Full build:
 
 ```bash
-xcodegen generate && xcodebuild -project WTEasy.xcodeproj -scheme WTEasy -destination "platform=macOS" build
+xcodegen generate && xcodebuild -project WTMux.xcodeproj -scheme WTMux -destination "platform=macOS" build
 ```
 
 ## Test
@@ -21,7 +21,7 @@ xcodegen generate && xcodebuild -project WTEasy.xcodeproj -scheme WTEasy -destin
 Run all tests across all packages:
 
 ```bash
-xcodebuild -project WTEasy.xcodeproj -scheme WTEasy -destination "platform=macOS" test
+xcodebuild -project WTMux.xcodeproj -scheme WTMux -destination "platform=macOS" test
 ```
 
 Run tests for a single package:
@@ -34,7 +34,7 @@ Tests use the Swift Testing framework (`@Test`, `#expect`).
 
 ## Architecture
 
-WTEasy is a macOS SwiftUI app for managing git worktrees with embedded terminals. The app is split into 6 local SPM packages under `Packages/`:
+WTMux is a macOS SwiftUI app for managing git worktrees with embedded terminals. The app is split into 6 local SPM packages under `Packages/`:
 
 - **WTCore** — SwiftData models (`Project`, `Worktree`, `ProjectProfile`, `RunConfiguration`) and `ProjectService`
 - **WTTransport** — `CommandTransport` protocol abstracting local vs SSH command execution; `LocalTransport` implementation
@@ -43,7 +43,7 @@ WTEasy is a macOS SwiftUI app for managing git worktrees with embedded terminals
 - **WTTerminal** — `TerminalRepresentable` (NSViewRepresentable wrapping SwiftTerm's `LocalProcessTerminalView`) and `TerminalSessionManager`
 - **WTDiff** — `DiffParser` and `SideBySideDiffView` for unified diff visualization
 
-The main app target (`WTEasy/`) contains the SwiftUI views organized by feature: `Sidebar/`, `Detail/`, `Interview/` (project setup wizard), `Settings/`, and `Diff/`.
+The main app target (`WTMux/`) contains the SwiftUI views organized by feature: `Sidebar/`, `Detail/`, `Interview/` (project setup wizard), `Settings/`, and `Diff/`.
 
 ### Key design patterns
 
@@ -56,7 +56,7 @@ The main app target (`WTEasy/`) contains the SwiftUI views organized by feature:
 After generating the Xcode project and building, run:
 
 ```bash
-xcode-build-server config -project WTEasy.xcodeproj -scheme WTEasy
+xcode-build-server config -project WTMux.xcodeproj -scheme WTMux
 ```
 
 This creates `buildServer.json` which tells SourceKit-LSP to use the Xcode build system for module resolution. Re-run after `xcodegen generate` + build if module imports stop resolving.

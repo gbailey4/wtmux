@@ -68,7 +68,7 @@ let userInfo: [String: String] = [
 ]
 
 DistributedNotificationCenter.default().postNotificationName(
-    NSNotification.Name("com.grahampark.wteasy.claudeStatus"),
+    NSNotification.Name("com.grahampark.wtmux.claudeStatus"),
     object: nil,
     userInfo: userInfo,
     deliverImmediately: true

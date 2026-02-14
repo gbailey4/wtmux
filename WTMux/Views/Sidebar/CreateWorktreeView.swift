@@ -5,7 +5,7 @@ import WTGit
 import WTTransport
 import os.log
 
-private let logger = Logger(subsystem: "com.wteasy", category: "CreateWorktreeView")
+private let logger = Logger(subsystem: "com.wtmux", category: "CreateWorktreeView")
 
 struct CreateWorktreeView: View {
     let project: Project

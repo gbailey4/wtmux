@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.grahampark.wteasy", category: "ClaudeStatus")
+private let logger = Logger(subsystem: "com.grahampark.wtmux", category: "ClaudeStatus")
 
 enum ClaudeCodeStatus: String {
     case idle
@@ -22,7 +22,7 @@ final class ClaudeStatusManager {
 
     init() {
         DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.grahampark.wteasy.claudeStatus"),
+            forName: NSNotification.Name("com.grahampark.wtmux.claudeStatus"),
             object: nil,
             queue: .main
         ) { [weak self] notification in

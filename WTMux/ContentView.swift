@@ -13,7 +13,7 @@ final class ProjectImportObserver {
 
     init() {
         DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.grahampark.wteasy.importProject"),
+            forName: NSNotification.Name("com.grahampark.wtmux.importProject"),
             object: nil,
             queue: .main
         ) { [weak self] notification in
@@ -106,7 +106,7 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Git Not Found")
                             .font(.subheadline.bold())
-                        Text("Install Xcode Command Line Tools to use WTEasy.")
+                        Text("Install Xcode Command Line Tools to use WTMux.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -168,7 +168,7 @@ struct ContentView: View {
     }
 
     private func handleImportURL(_ url: URL) {
-        guard url.scheme == "wteasy",
+        guard url.scheme == "wtmux",
               url.host == "import-project",
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let pathItem = components.queryItems?.first(where: { $0.name == "path" }),

@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 import os.log
 
-private let logger = Logger(subsystem: "com.wteasy", category: "ProjectService")
+private let logger = Logger(subsystem: "com.wtmux", category: "ProjectService")
 
 // @unchecked Sendable: ProjectService is always created and used on @MainActor
 // (via SwiftUI views with @Environment(\.modelContext)). @Observable does not
