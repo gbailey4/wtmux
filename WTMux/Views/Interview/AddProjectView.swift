@@ -404,6 +404,12 @@ struct AddProjectView: View {
                     }
                 }
             }
+
+            Section {
+                Text(".wtmux will be added to .gitignore if not already present.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .padding()

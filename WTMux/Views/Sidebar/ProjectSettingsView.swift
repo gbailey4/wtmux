@@ -308,16 +308,22 @@ struct ProjectSettingsView: View {
 
             Divider()
 
-            HStack {
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("Save") {
-                    save()
-                    dismiss()
+            VStack(spacing: 8) {
+                Text(".wtmux will be added to .gitignore if not already present.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Button("Cancel") { dismiss() }
+                        .keyboardShortcut(.cancelAction)
+                    Spacer()
+                    Button("Save") {
+                        save()
+                        dismiss()
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(name.isEmpty || repoPath.isEmpty)
                 }
-                .keyboardShortcut(.defaultAction)
-                .disabled(name.isEmpty || repoPath.isEmpty)
             }
             .padding()
         }

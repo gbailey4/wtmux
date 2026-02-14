@@ -42,7 +42,9 @@ public actor ConfigService {
     }
 
     /// Ensures `.wtmux` is listed in the repo's `.gitignore`.
-    public func ensureGitignore(forRepo repoPath: String) throws {
+    /// Returns `true` if `.wtmux` was newly added, `false` if already present.
+    @discardableResult
+    public func ensureGitignore(forRepo repoPath: String) throws -> Bool {
         let gitignoreURL = URL(fileURLWithPath: repoPath)
             .appendingPathComponent(".gitignore")
 
@@ -61,7 +63,9 @@ public actor ConfigService {
             let suffix = contents.hasSuffix("\n") ? "" : "\n"
             contents += "\(suffix).wtmux\n"
             try contents.write(to: gitignoreURL, atomically: true, encoding: .utf8)
+            return true
         }
+        return false
     }
 
     private func configFileURL(forRepo repoPath: String) -> URL {

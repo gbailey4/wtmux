@@ -293,9 +293,10 @@ struct ToolHandlers: Sendable {
             worktreeBasePath: worktreeBasePath
         )
 
+        let gitignoreAdded: Bool
         do {
             try await configService.writeConfig(config, forRepo: repoPath)
-            try await configService.ensureGitignore(forRepo: repoPath)
+            gitignoreAdded = try await configService.ensureGitignore(forRepo: repoPath)
         } catch {
             return .init(
                 content: [.text("Failed to write config: \(error.localizedDescription)")],
@@ -341,7 +342,10 @@ struct ToolHandlers: Sendable {
         if let cmd = terminalStartCommand {
             summary += "- Terminal start command: \(cmd)\n"
         }
-        summary += "\n.wtmux/config.json written, .gitignore updated, and project imported into WTMux."
+        let gitignoreNote = gitignoreAdded
+            ? "Added .wtmux to .gitignore."
+            : ".wtmux was already in .gitignore."
+        summary += "\n.wtmux/config.json written and project imported into WTMux. \(gitignoreNote)"
 
         return .init(content: [.text(summary)])
     }
