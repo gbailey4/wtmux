@@ -22,6 +22,12 @@ public final class Project {
     // Ordering
     public var sortOrder: Int = 0
 
+    // Sidebar state
+    public var isCollapsed: Bool = false
+
+    // Claude configuration state
+    public var needsClaudeConfig: Bool?
+
     @Relationship(deleteRule: .cascade, inverse: \Worktree.project)
     public var worktrees: [Worktree] = []
 

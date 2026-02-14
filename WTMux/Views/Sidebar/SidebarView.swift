@@ -45,6 +45,7 @@ struct SidebarView: View {
         List(selection: $selectedWorktreeID) {
             ForEach(projects) { project in
                 Section {
+                    if !project.isCollapsed {
                     ForEach(project.worktrees.sorted(by: { $0.sortOrder < $1.sortOrder })) { worktree in
                         WorktreeRow(
                             worktree: worktree,
@@ -80,8 +81,20 @@ struct SidebarView: View {
                     .onMove { from, to in
                         moveWorktree(from: from, to: to, in: project)
                     }
+                    }
                 } header: {
                     HStack {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(project.isCollapsed ? 0 : 90))
+                            .animation(.easeInOut(duration: 0.15), value: project.isCollapsed)
+                            .frame(width: 12)
+                            .onTapGesture {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    project.isCollapsed.toggle()
+                                }
+                            }
                         ProjectRow(project: project)
                         Spacer()
                         Button {
@@ -113,6 +126,19 @@ struct SidebarView: View {
                             .fill(Color.accentColor.opacity(projectDropTargetRepoPath == project.repoPath ? 0.15 : 0))
                     )
                     .contextMenu {
+                        if let firstWorktree = project.worktrees.sorted(by: { $0.sortOrder < $1.sortOrder }).first {
+                            Button {
+                                ClaudeConfigHelper.openConfigTerminal(
+                                    terminalSessionManager: terminalSessionManager,
+                                    worktreeId: firstWorktree.path,
+                                    workingDirectory: firstWorktree.path,
+                                    repoPath: project.repoPath
+                                )
+                                selectedWorktreeID = firstWorktree.path
+                            } label: {
+                                Label("Configure with Claude", systemImage: "terminal")
+                            }
+                        }
                         Button("Project Settings...") {
                             editingProject = project
                         }
@@ -152,7 +178,7 @@ struct SidebarView: View {
             CreateWorktreeView(project: project)
         }
         .sheet(item: $editingProject) { project in
-            ProjectSettingsView(project: project)
+            ProjectSettingsView(project: project, terminalSessionManager: terminalSessionManager)
         }
         .sheet(item: $worktreeToDelete) { wt in
             DeleteWorktreeSheet(
@@ -593,6 +619,12 @@ struct ProjectRow: View {
                 .font(.title3)
                 .fontWeight(.medium)
                 .foregroundStyle(.primary)
+            if project.needsClaudeConfig == true {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.orange)
+                    .help("Configuration pending")
+            }
         }
     }
 }
