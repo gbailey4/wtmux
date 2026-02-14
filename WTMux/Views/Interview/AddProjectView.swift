@@ -48,6 +48,7 @@ struct AddProjectView: View {
     // Configure with Claude
     @State private var showFirstWorktreeAlert = false
     @State private var firstWorktreeBranch = ""
+    @State private var claudeEnableError: String?
 
     enum InterviewStep: CaseIterable {
         case selectRepo
@@ -124,9 +125,21 @@ struct AddProjectView: View {
                             .keyboardShortcut(.defaultAction)
                             .disabled(!canAdvance || !claudeIntegrationService.canUseClaudeConfig)
                             if !claudeIntegrationService.mcpRegistered {
-                                Text("Enable Claude Code integration first (see banner or Settings).")
+                                HStack(spacing: 4) {
+                                    Text("Claude Code integration not enabled.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Button("Enable") {
+                                        enableClaudeIntegration()
+                                    }
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .buttonStyle(.link)
+                                }
+                            }
+                            if let claudeEnableError {
+                                Text(claudeEnableError)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
                             }
                         }
                     }
@@ -806,6 +819,17 @@ struct AddProjectView: View {
         detectedEnvFiles = detected
         for file in selected {
             selectedEnvFiles.insert(file)
+        }
+    }
+
+    private func enableClaudeIntegration() {
+        claudeEnableError = nil
+        do {
+            try claudeIntegrationService.enableAll()
+        } catch {
+            if !claudeIntegrationService.canUseClaudeConfig {
+                claudeEnableError = "Failed to enable: \(error.localizedDescription)"
+            }
         }
     }
 
