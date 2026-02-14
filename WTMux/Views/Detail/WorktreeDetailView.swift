@@ -21,6 +21,7 @@ struct WorktreeDetailView: View {
     @State private var showCloseTabAlert = false
     @State private var pendingCloseSessionId: String?
     @State private var showSetupBanner = false
+    @State private var showConfigPendingBanner = false
     @State private var showRerunSetupSheet = false
     @State private var suppressSetupConfirm = false
     @State private var lastActiveSetupSessionId: [String: String] = [:]
@@ -118,11 +119,52 @@ struct WorktreeDetailView: View {
         !(worktree.project?.profile?.runConfigurations.isEmpty ?? true)
     }
 
+    private var isClaudeConfigRunning: Bool {
+        terminalSessionManager.sessions(forWorktree: worktreeId).contains { session in
+            session.initialCommand?.contains("configure_project") == true
+        }
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             ZStack {
                 // Center: Main terminal tabs + runner terminals
                 VStack(spacing: 0) {
+                    // Configuration pending banner
+                    if showConfigPendingBanner, worktree.project?.needsClaudeConfig == true, !isClaudeConfigRunning {
+                        HStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .foregroundStyle(.orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Configuration Pending")
+                                    .font(.subheadline.bold())
+                                Text("Claude hasn't finished configuring this project yet")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Button("Configure with Claude") {
+                                showConfigPendingBanner = false
+                                openClaudeConfigTerminal()
+                            }
+                            .controlSize(.small)
+                            .buttonStyle(.borderedProminent)
+                            .tint(.orange)
+                            Button {
+                                showConfigPendingBanner = false
+                                worktree.project?.needsClaudeConfig = false
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.subheadline)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(10)
+                        .background(.orange.opacity(0.1))
+                        Divider()
+                    }
+
                     // Setup banner (inline, no safeAreaInset)
                     if showSetupBanner, let commands = worktree.project?.profile?.setupCommands,
                        !commands.filter({ !$0.isEmpty }).isEmpty {
@@ -198,6 +240,7 @@ struct WorktreeDetailView: View {
         .task(id: worktreeId) {
             activeDiffFile = nil
             changedFileCount = 0
+            showConfigPendingBanner = worktree.project?.needsClaudeConfig == true
             ensureFirstTab()
             if showRunnerPanel && hasRunConfigurations {
                 ensureRunnerSessions()
@@ -266,6 +309,23 @@ struct WorktreeDetailView: View {
                 showSetupBanner = true
             }
         }
+        .onChange(of: worktree.project?.needsClaudeConfig) { _, newValue in
+            if newValue == true {
+                showConfigPendingBanner = true
+            } else if newValue == false {
+                showConfigPendingBanner = false
+            }
+        }
+    }
+
+    private func openClaudeConfigTerminal() {
+        guard let repoPath = worktree.project?.repoPath else { return }
+        let claudeCommand = "claude \"Analyze the repo at \(repoPath) and use the wtmux MCP configure_project tool to configure it. Use \(repoPath) as the repoPath. Determine appropriate setup commands, run configurations (dev servers with ports), env files to copy between worktrees, and terminal start command. Before calling configure_project, present the proposed configuration to the user for review. If they give feedback, incorporate it and present the updated configuration again for approval. Only call configure_project once the user confirms.\""
+        _ = terminalSessionManager.createTab(
+            forWorktree: worktreeId,
+            workingDirectory: worktree.path,
+            initialCommand: claudeCommand
+        )
     }
 
     private func ensureFirstTab() {
