@@ -21,6 +21,9 @@ struct WorktreeDetailView: View {
     @State private var showCloseTabAlert = false
     @State private var pendingCloseSessionId: String?
     @State private var showSetupBanner = false
+    @State private var showRerunSetupSheet = false
+    @State private var suppressSetupConfirm = false
+    @State private var lastActiveSetupSessionId: [String: String] = [:]
 
     private var currentTheme: TerminalTheme {
         TerminalThemes.theme(forId: terminalThemeId)
@@ -52,9 +55,42 @@ struct WorktreeDetailView: View {
         terminalSessionManager.runnerSessions(forWorktree: worktreeId)
     }
 
+    /// Runner tabs for setup commands (runAsCommand sessions).
+    private var setupRunnerTabs: [TerminalSession] {
+        runnerTabs.filter { SessionID.isSetup($0.id) }
+    }
+
     /// Runner tabs that correspond to run configurations (excludes setup sessions).
     private var configRunnerTabs: [TerminalSession] {
-        runnerTabs.filter { !$0.runAsCommand }
+        runnerTabs.filter { !SessionID.isSetup($0.id) }
+    }
+
+    /// Whether the active runner tab is a setup session.
+    private var isSetupGroupActive: Bool {
+        guard let activeId = activeRunnerTabId else { return false }
+        return SessionID.isSetup(activeId)
+    }
+
+    /// Aggregate state across all setup sessions: failed > running > succeeded > idle.
+    private var setupGroupState: SessionState {
+        let tabs = setupRunnerTabs
+        if tabs.contains(where: { $0.state == .failed }) { return .failed }
+        if tabs.contains(where: { $0.state == .running }) { return .running }
+        if tabs.allSatisfy({ $0.state == .succeeded }) && !tabs.isEmpty { return .succeeded }
+        return .idle
+    }
+
+    /// Label like "2/3" showing completed setup commands vs total.
+    private var setupGroupLabel: String {
+        let total = setupRunnerTabs.count
+        let done = setupRunnerTabs.filter { $0.state == .succeeded || $0.state == .failed }.count
+        return "\(done)/\(total)"
+    }
+
+    /// Whether setup commands exist on the profile (regardless of whether sessions are running).
+    private var hasSetupCommands: Bool {
+        guard let commands = worktree.project?.profile?.setupCommands else { return false }
+        return !commands.filter({ !$0.isEmpty }).isEmpty
     }
 
     private var activeRunnerTabId: String? {
@@ -83,7 +119,7 @@ struct WorktreeDetailView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Setup Available")
                                     .font(.subheadline.bold())
-                                Text(commands.joined(separator: " && "))
+                                Text(commands.count == 1 ? commands[0] : "\(commands.count) setup commands")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
@@ -184,6 +220,19 @@ struct WorktreeDetailView: View {
                 Text("Worktree \"\(conflictingWorktreeName)\" is already using port\(conflictingPorts.count > 1 ? "s" : "") \(ports). Stop its runners and start here instead?")
             }
         }
+        .sheet(isPresented: $showRerunSetupSheet) {
+            RerunSetupSheet(
+                suppressConfirm: $suppressSetupConfirm,
+                onRun: {
+                    if suppressSetupConfirm {
+                        worktree.project?.profile?.confirmSetupRerun = false
+                    }
+                    showRerunSetupSheet = false
+                    runSetup()
+                },
+                onCancel: { showRerunSetupSheet = false }
+            )
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -228,20 +277,36 @@ struct WorktreeDetailView: View {
     }
 
     private func runSetup() {
+        showSetupBanner = false
         let commands = (worktree.project?.profile?.setupCommands ?? []).filter { !$0.isEmpty }
         guard !commands.isEmpty else { return }
-        let setupCommand = commands.joined(separator: " && ")
-        let session = terminalSessionManager.createSetupSession(
+        // Clean up any previous setup sessions before (re)running
+        terminalSessionManager.removeSetupSessions(forWorktree: worktreeId)
+        let sessions = terminalSessionManager.createSetupSessions(
             worktreeId: worktreeId,
             workingDirectory: worktree.path,
-            command: setupCommand
+            commands: commands
         )
-        session.onProcessExit = { [weak terminalSessionManager] sessionId, exitCode in
-            terminalSessionManager?.handleProcessExit(sessionId: sessionId, exitCode: exitCode)
+        for session in sessions {
+            session.onProcessExit = { [weak terminalSessionManager] sessionId, exitCode in
+                terminalSessionManager?.handleProcessExit(sessionId: sessionId, exitCode: exitCode)
+            }
         }
         worktree.needsSetup = false
         showRunnerPanel = true
+        if let firstId = sessions.first?.id {
+            lastActiveSetupSessionId[worktreeId] = firstId
+        }
         ensureRunnerSessions()
+    }
+
+    private func confirmAndRunSetup() {
+        guard worktree.project?.profile?.confirmSetupRerun != false else {
+            runSetup()
+            return
+        }
+        suppressSetupConfirm = false
+        showRerunSetupSheet = true
     }
 
     // MARK: - Open In Editor
@@ -510,6 +575,9 @@ struct WorktreeDetailView: View {
         let activeSession = activeRunnerTabId.flatMap { terminalSessionManager.session(for: $0) }
         VStack(spacing: 0) {
             runnerTabBar
+            if isSetupGroupActive && setupRunnerTabs.count > 1 {
+                setupSubTabBar
+            }
             ZStack {
                 // Persist all runner sessions across worktree switches
                 ForEach(allRunnerSessions) { session in
@@ -562,13 +630,35 @@ struct WorktreeDetailView: View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
-                    ForEach(runnerTabs) { session in
+                    // Setup group tab (single tab replacing individual setup tabs)
+                    if !setupRunnerTabs.isEmpty {
+                        setupGroupTab
+                    }
+                    ForEach(configRunnerTabs) { session in
                         runnerTab(session: session)
                     }
                 }
             }
 
             Spacer()
+
+            // "Run Setup" button when setup commands exist but sessions have been dismissed
+            if setupRunnerTabs.isEmpty && hasSetupCommands {
+                Button {
+                    confirmAndRunSetup()
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 11))
+                        Text("Run Setup")
+                            .font(.subheadline)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                }
+                .buttonStyle(.plain)
+                .help("Run Setup Commands")
+            }
 
             if hasIdleDefaultSessions {
                 // Start default runners
@@ -752,6 +842,136 @@ struct WorktreeDetailView: View {
         .background(session.id == activeRunnerTabId ? Color.accentColor.opacity(0.2) : Color.clear)
     }
 
+    // MARK: - Setup Group Tab
+
+    @ViewBuilder
+    private var setupGroupTab: some View {
+        let _ = terminalSessionManager.runnerStateVersion
+        let allDone = setupRunnerTabs.allSatisfy({ $0.state == .succeeded || $0.state == .failed })
+        HStack(spacing: 4) {
+            // State indicator
+            switch setupGroupState {
+            case .running:
+                Circle()
+                    .fill(.green)
+                    .frame(width: 8, height: 8)
+            case .succeeded:
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.system(size: 12))
+            case .failed:
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.red)
+                    .font(.system(size: 12))
+            case .idle:
+                Circle()
+                    .fill(.secondary)
+                    .frame(width: 8, height: 8)
+            }
+
+            Button {
+                activateSetupGroup()
+            } label: {
+                HStack(spacing: 2) {
+                    Text("Setup")
+                        .lineLimit(1)
+                    Text("(\(setupGroupLabel))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if allDone {
+                // Rerun
+                Button {
+                    confirmAndRunSetup()
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.plain)
+                .help("Rerun Setup")
+
+                // Dismiss
+                Button {
+                    terminalSessionManager.removeSetupSessions(forWorktree: worktreeId)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                }
+                .buttonStyle(.plain)
+                .help("Dismiss Setup")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(isSetupGroupActive ? Color.accentColor.opacity(0.2) : Color.clear)
+    }
+
+    private func activateSetupGroup() {
+        // Restore last-viewed setup sub-tab, or fall back to first
+        let targetId = lastActiveSetupSessionId[worktreeId] ?? setupRunnerTabs.first?.id
+        if let id = targetId {
+            terminalSessionManager.setActiveRunnerSession(worktreeId: worktreeId, sessionId: id)
+        }
+    }
+
+    @ViewBuilder
+    private var setupSubTabBar: some View {
+        let _ = terminalSessionManager.runnerStateVersion
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    ForEach(setupRunnerTabs) { session in
+                        setupSubTab(session: session)
+                    }
+                }
+            }
+            Spacer()
+        }
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+    }
+
+    @ViewBuilder
+    private func setupSubTab(session: TerminalSession) -> some View {
+        let _ = terminalSessionManager.runnerStateVersion
+        HStack(spacing: 3) {
+            // State indicator (smaller)
+            switch session.state {
+            case .running:
+                Circle()
+                    .fill(.green)
+                    .frame(width: 6, height: 6)
+            case .succeeded:
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.system(size: 10))
+            case .failed:
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.red)
+                    .font(.system(size: 10))
+            case .idle:
+                Circle()
+                    .fill(.secondary)
+                    .frame(width: 6, height: 6)
+            }
+
+            Button {
+                terminalSessionManager.setActiveRunnerSession(worktreeId: worktreeId, sessionId: session.id)
+                lastActiveSetupSessionId[worktreeId] = session.id
+            } label: {
+                Text(session.title)
+                    .font(.caption)
+                    .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(session.id == activeRunnerTabId ? Color.accentColor.opacity(0.15) : Color.clear)
+    }
+
     private func isDefaultRunner(_ session: TerminalSession) -> Bool {
         runConfiguration(for: session)?.autoStart ?? true
     }
@@ -857,4 +1077,41 @@ struct WorktreeDetailView: View {
         runConfigurations.first { $0.name == session.title }
     }
 
+}
+
+// MARK: - Rerun Setup Sheet
+
+struct RerunSetupSheet: View {
+    @Binding var suppressConfirm: Bool
+    let onRun: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "gearshape")
+                .font(.largeTitle)
+                .foregroundStyle(.blue)
+
+            Text("Re-run Project Setup?")
+                .font(.headline)
+
+            Text("This will re-run all setup commands for this worktree.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Toggle("Don't ask again for this project", isOn: $suppressConfirm)
+                .padding(.horizontal)
+
+            HStack {
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Run Setup", action: onRun)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 380)
+    }
 }

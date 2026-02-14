@@ -30,6 +30,7 @@ struct ProjectSettingsView: View {
     @State private var envFilesToCopy: [String]
     @State private var terminalStartCommand: String
     @State private var startClaudeInTerminals: Bool
+    @State private var confirmSetupRerun: Bool
 
     // AI analysis
     @AppStorage("llmModel") private var llmModel = "claude-sonnet-4-5-20250929"
@@ -56,6 +57,7 @@ struct ProjectSettingsView: View {
         _envFilesToCopy = State(initialValue: profile?.envFilesToCopy ?? [])
         _terminalStartCommand = State(initialValue: profile?.terminalStartCommand ?? "")
         _startClaudeInTerminals = State(initialValue: profile?.terminalStartCommand == "claude")
+        _confirmSetupRerun = State(initialValue: profile?.confirmSetupRerun ?? true)
         _runConfigurations = State(initialValue: (profile?.runConfigurations ?? [])
             .sorted { $0.order < $1.order }
             .map { EditableRunConfig(
@@ -232,6 +234,7 @@ struct ProjectSettingsView: View {
                     } label: {
                         Label("Add Command", systemImage: "plus")
                     }
+                    Toggle("Confirm before re-running setup", isOn: $confirmSetupRerun)
                 }
 
                 Section("Terminal") {
@@ -486,6 +489,7 @@ struct ProjectSettingsView: View {
 
         profile.envFilesToCopy = envFilesToCopy.filter { !$0.isEmpty }
         profile.setupCommands = setupCommands.filter { !$0.isEmpty }
+        profile.confirmSetupRerun = confirmSetupRerun
         profile.terminalStartCommand = startClaudeInTerminals ? "claude" : (terminalStartCommand.isEmpty ? nil : terminalStartCommand)
 
         // Remove old run configurations
