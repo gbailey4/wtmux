@@ -19,6 +19,7 @@ public final class Worktree {
     public var createdAt: Date
     public var notes: String?
     public var needsSetup: Bool?
+    public var sortOrder: Int = 0
 
     public var status: WorktreeStatus {
         get { WorktreeStatus(rawValue: statusRaw) ?? .error }
@@ -29,12 +30,14 @@ public final class Worktree {
         branchName: String,
         path: String,
         baseBranch: String,
-        status: WorktreeStatus = .creating
+        status: WorktreeStatus = .creating,
+        sortOrder: Int = 0
     ) {
         self.branchName = branchName
         self.path = path
         self.baseBranch = baseBranch
         self.statusRaw = status.rawValue
+        self.sortOrder = sortOrder
         self.createdAt = Date()
         self.needsSetup = false
     }

@@ -19,6 +19,9 @@ public final class Project {
     public var colorName: String?
     public var iconName: String?
 
+    // Ordering
+    public var sortOrder: Int = 0
+
     @Relationship(deleteRule: .cascade, inverse: \Worktree.project)
     public var worktrees: [Worktree] = []
 
@@ -63,13 +66,20 @@ public final class Project {
         return colorPalette[count % colorPalette.count]
     }
 
+    public static func nextSortOrder(in modelContext: ModelContext) -> Int {
+        let descriptor = FetchDescriptor<Project>(sortBy: [SortDescriptor(\.sortOrder, order: .reverse)])
+        let projects = (try? modelContext.fetch(descriptor)) ?? []
+        return (projects.first?.sortOrder ?? -1) + 1
+    }
+
     public init(
         name: String,
         repoPath: String,
         defaultBranch: String = "main",
         worktreeBasePath: String = "",
         colorName: String? = nil,
-        iconName: String? = nil
+        iconName: String? = nil,
+        sortOrder: Int = 0
     ) {
         self.name = name
         self.repoPath = repoPath
@@ -77,6 +87,7 @@ public final class Project {
         self.worktreeBasePath = worktreeBasePath
         self.colorName = colorName
         self.iconName = iconName
+        self.sortOrder = sortOrder
         self.createdAt = Date()
     }
 }

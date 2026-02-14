@@ -103,11 +103,13 @@ struct CreateWorktreeView: View {
                     )
                 }
 
+                let nextOrder = (project.worktrees.map(\.sortOrder).max() ?? -1) + 1
                 let worktree = Worktree(
                     branchName: branchName,
                     path: worktreePath,
                     baseBranch: baseBranch,
-                    status: .ready
+                    status: .ready,
+                    sortOrder: nextOrder
                 )
                 if !(project.profile?.setupCommands ?? []).isEmpty {
                     worktree.needsSetup = true

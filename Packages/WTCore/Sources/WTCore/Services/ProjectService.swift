@@ -16,7 +16,7 @@ public final class ProjectService: @unchecked Sendable {
     }
 
     public func fetchProjects() throws -> [Project] {
-        let descriptor = FetchDescriptor<Project>(sortBy: [SortDescriptor(\.name)])
+        let descriptor = FetchDescriptor<Project>(sortBy: [SortDescriptor(\.sortOrder)])
         return try modelContext.fetch(descriptor)
     }
 

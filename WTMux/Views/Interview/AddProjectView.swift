@@ -644,7 +644,8 @@ struct AddProjectView: View {
                     repoPath: repoPath,
                     defaultBranch: defaultBranch,
                     worktreeBasePath: worktreeBasePath,
-                    colorName: Project.nextColorName(in: modelContext)
+                    colorName: Project.nextColorName(in: modelContext),
+                    sortOrder: Project.nextSortOrder(in: modelContext)
                 )
                 modelContext.insert(project)
             }
@@ -662,11 +663,13 @@ struct AddProjectView: View {
             }
 
             // 3. Create worktree model
+            let nextWorktreeOrder = (project.worktrees.map(\.sortOrder).max() ?? -1) + 1
             let worktree = Worktree(
                 branchName: branchName,
                 path: worktreePath,
                 baseBranch: defaultBranch,
-                status: .ready
+                status: .ready,
+                sortOrder: nextWorktreeOrder
             )
             worktree.project = project
 
@@ -703,7 +706,8 @@ struct AddProjectView: View {
                 repoPath: repoPath,
                 defaultBranch: defaultBranch,
                 worktreeBasePath: worktreeBasePath,
-                colorName: Project.nextColorName(in: modelContext)
+                colorName: Project.nextColorName(in: modelContext),
+                sortOrder: Project.nextSortOrder(in: modelContext)
             )
             modelContext.insert(project)
         }
@@ -743,6 +747,7 @@ struct AddProjectView: View {
 
         // Import selected existing worktrees
         let existingPaths = Set(project.worktrees.map(\.path))
+        var nextOrder = (project.worktrees.map(\.sortOrder).max() ?? -1) + 1
         for wt in detectedWorktrees where selectedWorktreePaths.contains(wt.path) {
             guard !existingPaths.contains(wt.path) else { continue }
             let branchName = wt.branch ?? URL(fileURLWithPath: wt.path).lastPathComponent
@@ -750,9 +755,11 @@ struct AddProjectView: View {
                 branchName: branchName,
                 path: wt.path,
                 baseBranch: defaultBranch,
-                status: .ready
+                status: .ready,
+                sortOrder: nextOrder
             )
             worktree.project = project
+            nextOrder += 1
         }
 
         do {

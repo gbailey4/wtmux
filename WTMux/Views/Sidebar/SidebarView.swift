@@ -33,6 +33,7 @@ struct SidebarView: View {
     @State private var conflictingWorktreeName = ""
     @State private var conflictingPorts: [Int] = []
     @State private var worktreeToStartRunners: Worktree?
+    @State private var projectDropTargetRepoPath: String?
 
     private var runningWorktreeIds: Set<String> {
         // Read runnerStateVersion to trigger re-evaluation when runners stop/restart
@@ -44,7 +45,7 @@ struct SidebarView: View {
         List(selection: $selectedWorktreeID) {
             ForEach(projects) { project in
                 Section {
-                    ForEach(project.worktrees.sorted(by: { $0.createdAt < $1.createdAt })) { worktree in
+                    ForEach(project.worktrees.sorted(by: { $0.sortOrder < $1.sortOrder })) { worktree in
                         WorktreeRow(
                             worktree: worktree,
                             isDeleting: deletingWorktreePaths.contains(worktree.path),
@@ -59,12 +60,25 @@ struct SidebarView: View {
                             onStopRunners: { stopRunners(for: worktree) }
                         )
                             .tag(worktree.path)
+                            .dropDestination(for: String.self) { droppedIds, _ in
+                                projectDropTargetRepoPath = nil
+                                guard let droppedPath = droppedIds.first,
+                                      droppedPath != project.repoPath,
+                                      isProjectRepoPath(droppedPath) else { return false }
+                                reorderProject(droppedRepoPath: droppedPath, targetRepoPath: project.repoPath)
+                                return true
+                            } isTargeted: { isTargeted in
+                                projectDropTargetRepoPath = isTargeted ? project.repoPath : nil
+                            }
                             .selectionDisabled(deletingWorktreePaths.contains(worktree.path))
                             .contextMenu {
                                 if !deletingWorktreePaths.contains(worktree.path) {
                                     worktreeContextMenu(worktree: worktree)
                                 }
                             }
+                    }
+                    .onMove { from, to in
+                        moveWorktree(from: from, to: to, in: project)
                     }
                 } header: {
                     HStack {
@@ -79,6 +93,25 @@ struct SidebarView: View {
                         .buttonStyle(.borderless)
                         .help("New Worktree")
                     }
+                    .draggable(project.repoPath) {
+                        ProjectRow(project: project)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.background, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .dropDestination(for: String.self) { droppedIds, _ in
+                        projectDropTargetRepoPath = nil
+                        guard let droppedPath = droppedIds.first,
+                              droppedPath != project.repoPath else { return false }
+                        reorderProject(droppedRepoPath: droppedPath, targetRepoPath: project.repoPath)
+                        return true
+                    } isTargeted: { isTargeted in
+                        projectDropTargetRepoPath = isTargeted ? project.repoPath : nil
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.accentColor.opacity(projectDropTargetRepoPath == project.repoPath ? 0.15 : 0))
+                    )
                     .contextMenu {
                         Button("Project Settings...") {
                             editingProject = project
@@ -91,6 +124,15 @@ struct SidebarView: View {
                     }
                 }
             }
+        }
+        .dropDestination(for: String.self) { droppedIds, _ in
+            projectDropTargetRepoPath = nil
+            guard let droppedPath = droppedIds.first,
+                  isProjectRepoPath(droppedPath) else { return false }
+            moveProjectToEnd(droppedRepoPath: droppedPath)
+            return true
+        } isTargeted: { isTargeted in
+            projectDropTargetRepoPath = isTargeted ? "__bottom__" : nil
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
@@ -182,6 +224,41 @@ struct SidebarView: View {
                 let ports = conflictingPorts.map(String.init).joined(separator: ", ")
                 Text("Worktree \"\(conflictingWorktreeName)\" is already using port\(conflictingPorts.count > 1 ? "s" : "") \(ports). Stop its runners and start here instead?")
             }
+        }
+    }
+
+    // MARK: - Reorder
+
+    private func isProjectRepoPath(_ path: String) -> Bool {
+        projects.contains { $0.repoPath == path }
+    }
+
+    private func reorderProject(droppedRepoPath: String, targetRepoPath: String) {
+        var sorted = projects.sorted { $0.sortOrder < $1.sortOrder }
+        guard let fromIndex = sorted.firstIndex(where: { $0.repoPath == droppedRepoPath }),
+              let toIndex = sorted.firstIndex(where: { $0.repoPath == targetRepoPath }) else { return }
+        let moved = sorted.remove(at: fromIndex)
+        sorted.insert(moved, at: toIndex)
+        for (index, project) in sorted.enumerated() {
+            project.sortOrder = index
+        }
+    }
+
+    private func moveProjectToEnd(droppedRepoPath: String) {
+        var sorted = projects.sorted { $0.sortOrder < $1.sortOrder }
+        guard let fromIndex = sorted.firstIndex(where: { $0.repoPath == droppedRepoPath }) else { return }
+        let moved = sorted.remove(at: fromIndex)
+        sorted.append(moved)
+        for (index, project) in sorted.enumerated() {
+            project.sortOrder = index
+        }
+    }
+
+    private func moveWorktree(from source: IndexSet, to destination: Int, in project: Project) {
+        var sorted = project.worktrees.sorted { $0.sortOrder < $1.sortOrder }
+        sorted.move(fromOffsets: source, toOffset: destination)
+        for (index, worktree) in sorted.enumerated() {
+            worktree.sortOrder = index
         }
     }
 
