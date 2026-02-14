@@ -12,6 +12,7 @@ struct WorktreeDetailView: View {
     @Binding var showRunnerPanel: Bool
     @Binding var changedFileCount: Int
 
+    @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
 
     @State private var activeDiffFile: DiffFile?
@@ -151,6 +152,7 @@ struct WorktreeDetailView: View {
                             .controlSize(.small)
                             .buttonStyle(.borderedProminent)
                             .tint(.orange)
+                            .disabled(!claudeIntegrationService.canUseClaudeConfig)
                             Button {
                                 showConfigPendingBanner = false
                                 worktree.project?.needsClaudeConfig = false

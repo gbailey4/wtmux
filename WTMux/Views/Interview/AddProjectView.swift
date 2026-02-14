@@ -15,6 +15,7 @@ struct AddProjectView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
 
     @State private var step: InterviewStep = .selectRepo
     @State private var repoPath = ""
@@ -111,15 +112,24 @@ struct AddProjectView: View {
                         goNext()
                     }
                     .disabled(!canAdvance)
-                    Button("Configure with Claude") {
-                        if worktreeBasePath.isEmpty {
-                            worktreeBasePath = "\(repoPath)-worktrees"
+                    if claudeIntegrationService.claudeCodeInstalled {
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Button("Configure with Claude") {
+                                if worktreeBasePath.isEmpty {
+                                    worktreeBasePath = "\(repoPath)-worktrees"
+                                }
+                                firstWorktreeBranch = ""
+                                showFirstWorktreeAlert = true
+                            }
+                            .keyboardShortcut(.defaultAction)
+                            .disabled(!canAdvance || !claudeIntegrationService.canUseClaudeConfig)
+                            if !claudeIntegrationService.mcpRegistered {
+                                Text("Enable Claude Code integration first (see banner or Settings).")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
-                        firstWorktreeBranch = ""
-                        showFirstWorktreeAlert = true
                     }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!canAdvance)
                 } else {
                     Button("Back") { goBack() }
                     Button(step == .review ? "Create Project" : "Next") {

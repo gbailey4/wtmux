@@ -46,8 +46,10 @@ struct ContentView: View {
     @State private var terminalSessionManager = TerminalSessionManager()
     @State private var claudeStatusManager = ClaudeStatusManager()
     @State private var importObserver = ProjectImportObserver()
+    @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
     @State private var gitAvailable: Bool? = nil
     @State private var gitCheckDismissed = false
+    @AppStorage("claudeIntegrationDismissed") private var claudeIntegrationDismissed = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -61,22 +63,7 @@ struct ContentView: View {
             )
             .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 320)
         } detail: {
-            if let selectedWorktreeID,
-               let worktree = findWorktree(id: selectedWorktreeID) {
-                WorktreeDetailView(
-                    worktree: worktree,
-                    terminalSessionManager: terminalSessionManager,
-                    showRightPanel: $showRightPanel,
-                    showRunnerPanel: $showRunnerPanel,
-                    changedFileCount: $changedFileCount
-                )
-            } else {
-                ContentUnavailableView(
-                    "No Worktree Selected",
-                    systemImage: "terminal",
-                    description: Text("Select a worktree from the sidebar or add a project to get started.")
-                )
-            }
+            detailContent
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -98,41 +85,6 @@ struct ContentView: View {
                 }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
                 .help("Toggle Diff Panel (Cmd+Shift+D)")
-            }
-        }
-        .safeAreaInset(edge: .top) {
-            if gitAvailable == false && !gitCheckDismissed {
-                HStack(spacing: 12) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.yellow)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Git Not Found")
-                            .font(.subheadline.bold())
-                        Text("Install Xcode Command Line Tools to use WTMux.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("Copy Command") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString("xcode-select --install", forType: .string)
-                    }
-                    .controlSize(.small)
-                    Button("Retry") {
-                        Task { await checkGitAvailability() }
-                    }
-                    .controlSize(.small)
-                    Button {
-                        gitCheckDismissed = true
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.subheadline)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(10)
-                .background(.yellow.opacity(0.15))
-                .overlay(alignment: .bottom) { Divider() }
             }
         }
         .task {
@@ -252,6 +204,100 @@ struct ContentView: View {
             project.colorName = Project.nextColorName(in: modelContext)
         }
         try? modelContext.save()
+    }
+
+    @ViewBuilder
+    private var detailContent: some View {
+        VStack(spacing: 0) {
+            if gitAvailable == false && !gitCheckDismissed {
+                HStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.yellow)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Git Not Found")
+                            .font(.subheadline.bold())
+                        Text("Install Xcode Command Line Tools to use WTMux.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Copy Command") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString("xcode-select --install", forType: .string)
+                    }
+                    .controlSize(.small)
+                    Button("Retry") {
+                        Task { await checkGitAvailability() }
+                    }
+                    .controlSize(.small)
+                    Button {
+                        gitCheckDismissed = true
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.subheadline)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(10)
+                .background(.yellow.opacity(0.15))
+                Divider()
+            }
+
+            if claudeIntegrationService.claudeCodeInstalled
+                && !claudeIntegrationService.mcpRegistered
+                && !claudeIntegrationDismissed {
+                HStack(spacing: 12) {
+                    Image(systemName: "terminal.fill")
+                        .foregroundStyle(.blue)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Claude Code Integration")
+                            .font(.subheadline.bold())
+                        Text("Enable WTMux tools in Claude Code for automatic project configuration.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Enable") {
+                        do {
+                            try claudeIntegrationService.enableAll()
+                        } catch {
+                            // Silently fail; user can use Settings
+                        }
+                    }
+                    .controlSize(.small)
+                    .buttonStyle(.borderedProminent)
+                    Button {
+                        claudeIntegrationDismissed = true
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.subheadline)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(10)
+                .background(.blue.opacity(0.1))
+                Divider()
+            }
+
+            if let selectedWorktreeID,
+               let worktree = findWorktree(id: selectedWorktreeID) {
+                WorktreeDetailView(
+                    worktree: worktree,
+                    terminalSessionManager: terminalSessionManager,
+                    showRightPanel: $showRightPanel,
+                    showRunnerPanel: $showRunnerPanel,
+                    changedFileCount: $changedFileCount
+                )
+                .frame(maxHeight: .infinity)
+            } else {
+                ContentUnavailableView(
+                    "No Worktree Selected",
+                    systemImage: "terminal",
+                    description: Text("Select a worktree from the sidebar or add a project to get started.")
+                )
+                .frame(maxHeight: .infinity)
+            }
+        }
     }
 
     private func findWorktree(id: String) -> Worktree? {

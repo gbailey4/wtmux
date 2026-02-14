@@ -11,6 +11,7 @@ struct ProjectSettingsView: View {
     @Bindable var project: Project
     let terminalSessionManager: TerminalSessionManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
 
     @State private var name: String
     @State private var repoPath: String
@@ -374,6 +375,7 @@ struct ProjectSettingsView: View {
             } label: {
                 Label("Configure with Claude", systemImage: "terminal")
             }
+            .disabled(!claudeIntegrationService.canUseClaudeConfig)
         }
     }
 

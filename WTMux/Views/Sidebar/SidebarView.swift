@@ -18,6 +18,7 @@ struct SidebarView: View {
     let claudeStatusManager: ClaudeStatusManager
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
     @State private var worktreeTargetProject: Project?
     @State private var editingProject: Project?
     @State private var worktreeToDelete: Worktree?
@@ -138,6 +139,7 @@ struct SidebarView: View {
                             } label: {
                                 Label("Configure with Claude", systemImage: "terminal")
                             }
+                            .disabled(!claudeIntegrationService.canUseClaudeConfig)
                         }
                         Button("Project Settings...") {
                             editingProject = project
