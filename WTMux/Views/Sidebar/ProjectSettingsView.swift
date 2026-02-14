@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 import WTCore
-import WTLLM
+import WTTerminal
 import WTTransport
 import os.log
 
@@ -9,6 +9,7 @@ private let logger = Logger(subsystem: "com.wtmux", category: "ProjectSettingsVi
 
 struct ProjectSettingsView: View {
     @Bindable var project: Project
+    let terminalSessionManager: TerminalSessionManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var name: String
@@ -32,12 +33,9 @@ struct ProjectSettingsView: View {
     @State private var startClaudeInTerminals: Bool
     @State private var confirmSetupRerun: Bool
 
-    // AI analysis
-    @AppStorage("llmModel") private var llmModel = "claude-sonnet-4-5-20250929"
-    @State private var analysisManager = AIAnalysisManager()
-
-    init(project: Project) {
+    init(project: Project, terminalSessionManager: TerminalSessionManager) {
         self.project = project
+        self.terminalSessionManager = terminalSessionManager
         _name = State(initialValue: project.name)
         _repoPath = State(initialValue: project.repoPath)
         _defaultBranch = State(initialValue: project.defaultBranch)
@@ -74,7 +72,7 @@ struct ProjectSettingsView: View {
             Form {
                 Section {
                     HStack {
-                        reanalyzeButton
+                        configureWithClaudeButton
                         Spacer()
                         reloadFromFileButton
                     }
@@ -323,16 +321,6 @@ struct ProjectSettingsView: View {
             .padding()
         }
         .frame(width: 550, height: 600)
-        .sheet(isPresented: $analysisManager.showAnalysisPreview) {
-            if let analysis = analysisManager.pendingAnalysis {
-                AIAnalysisPreviewSheet(analysis: analysis) {
-                    applyAnalysis(analysis)
-                    analysisManager.dismissPreview()
-                } onCancel: {
-                    analysisManager.dismissPreview()
-                }
-            }
-        }
     }
 
     private func browseRepoPath() {
@@ -368,52 +356,23 @@ struct ProjectSettingsView: View {
     }
 
     @ViewBuilder
-    private var reanalyzeButton: some View {
-        if let apiKey = KeychainStore.loadAPIKey(for: .claude) {
-            switch analysisManager.state {
-            case .idle:
-                Button {
-                    analysisManager.runAnalysis(apiKey: apiKey, model: llmModel, repoPath: repoPath)
-                } label: {
-                    Label("Re-analyze with AI", systemImage: "sparkles")
-                }
-            case .gatheringContext:
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Gathering project files...")
-                        .foregroundStyle(.secondary)
-                }
-            case .analyzing:
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Analyzing project...")
-                        .foregroundStyle(.secondary)
-                }
-            case .failed(let message):
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                    Button {
-                        analysisManager.runAnalysis(apiKey: apiKey, model: llmModel, repoPath: repoPath)
-                    } label: {
-                        Label("Retry", systemImage: "sparkles")
-                    }
-                }
-            }
+    private var configureWithClaudeButton: some View {
+        if project.worktrees.isEmpty {
+            Label("Configure with Claude", systemImage: "terminal")
+                .foregroundStyle(.secondary)
+                .help("Add a worktree first to configure with Claude")
         } else {
-            HStack {
-                Image(systemName: "sparkles")
-                    .foregroundStyle(.secondary)
-                Text("Configure an AI provider in Settings to auto-detect configuration")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                SettingsLink {
-                    Text("Open Settings")
-                        .font(.caption)
-                }
+            Button {
+                let worktree = project.worktrees.sorted(by: { $0.sortOrder < $1.sortOrder }).first!
+                ClaudeConfigHelper.openConfigTerminal(
+                    terminalSessionManager: terminalSessionManager,
+                    worktreeId: worktree.path,
+                    workingDirectory: worktree.path,
+                    repoPath: repoPath
+                )
+                dismiss()
+            } label: {
+                Label("Configure with Claude", systemImage: "terminal")
             }
         }
     }
@@ -448,19 +407,6 @@ struct ProjectSettingsView: View {
         }
     }
 
-    private func applyAnalysis(_ analysis: ProjectAnalysis) {
-        envFilesToCopy = analysis.envFilesToCopy
-        setupCommands = analysis.setupCommands
-        if analysis.terminalStartCommand == "claude" {
-            startClaudeInTerminals = true
-            terminalStartCommand = ""
-        } else {
-            startClaudeInTerminals = false
-            terminalStartCommand = analysis.terminalStartCommand ?? ""
-        }
-        runConfigurations = analysis.toEditableRunConfigs()
-    }
-
     private func save() {
         project.name = name
         project.repoPath = repoPath
@@ -468,6 +414,7 @@ struct ProjectSettingsView: View {
         project.worktreeBasePath = worktreeBasePath
         project.colorName = selectedColor
         project.iconName = selectedIcon
+        project.needsClaudeConfig = false
 
         if isRemote {
             project.sshHost = sshHost.isEmpty ? nil : sshHost

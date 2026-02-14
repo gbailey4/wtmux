@@ -1,17 +1,11 @@
 import SwiftUI
 import UniformTypeIdentifiers
-import WTLLM
 import WTTerminal
 
 struct SettingsView: View {
     @AppStorage("defaultShell") private var defaultShell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
     @AppStorage("terminalFontSize") private var terminalFontSize = 13.0
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
-
-    @AppStorage("llmModel") private var llmModel = "claude-sonnet-4-5-20250929"
-    @State private var apiKeyInput = ""
-    @State private var apiKeyStatus: APIKeyStatus = .unknown
-    @State private var isVerifying = false
 
     @State private var customEditors = ExternalEditor.customEditors
     @State private var hiddenEditorIds = ExternalEditor.hiddenEditorIds
@@ -56,41 +50,6 @@ struct SettingsView: View {
                             .tag(theme.id)
                         }
                     }
-                }
-            }
-
-            Section("AI") {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Claude API Key")
-                        .foregroundStyle(.secondary)
-                    HStack {
-                        SecureField("sk-ant-...", text: $apiKeyInput)
-                            .textFieldStyle(.roundedBorder)
-                        Button(apiKeyStatus == .valid ? "Verified" : "Verify") {
-                            verifyAPIKey()
-                        }
-                        .disabled(apiKeyInput.isEmpty || isVerifying)
-                    }
-                    if case .invalid(let message) = apiKeyStatus {
-                        Text(message)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    } else if apiKeyStatus == .valid {
-                        Text("API key is valid")
-                            .font(.caption)
-                            .foregroundStyle(.green)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Model")
-                        .foregroundStyle(.secondary)
-                    TextField("", text: $llmModel)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(.body, design: .monospaced))
-                    Text("Default: claude-sonnet-4-5-20250929")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -170,13 +129,7 @@ struct SettingsView: View {
         .frame(width: 450)
         .navigationTitle("Settings")
         .onAppear {
-            if let key = KeychainStore.loadAPIKey(for: .claude) {
-                apiKeyInput = key
-            }
             checkAgentStatus()
-        }
-        .onChange(of: apiKeyInput) {
-            apiKeyStatus = .unknown
         }
     }
 
@@ -191,48 +144,6 @@ struct SettingsView: View {
 
         if panel.runModal() == .OK, let url = panel.url {
             defaultShell = url.path
-        }
-    }
-
-    private func verifyAPIKey() {
-        guard !apiKeyInput.isEmpty else { return }
-        isVerifying = true
-        apiKeyStatus = .unknown
-
-        // Save the key first
-        try? KeychainStore.saveAPIKey(apiKeyInput, for: .claude)
-
-        Task {
-            let provider = ClaudeProvider(apiKey: apiKeyInput, model: llmModel)
-            let tool = PromptBuilder.analysisToolDefinition()
-
-            do {
-                _ = try await provider.analyzeWithTool(
-                    systemPrompt: "You are a test. Respond with empty analysis.",
-                    userMessage: "Test connection. Return empty arrays.",
-                    tool: tool,
-                    timeout: 15
-                )
-                apiKeyStatus = .valid
-            } catch let error as LLMError {
-                switch error {
-                case .noAPIKey:
-                    apiKeyStatus = .invalid(message: "Invalid API key")
-                case .networkError(let detail):
-                    apiKeyStatus = .invalid(message: "Network error: \(detail)")
-                case .rateLimited:
-                    // Rate limited means the key is valid
-                    apiKeyStatus = .valid
-                case .timeout:
-                    apiKeyStatus = .invalid(message: "Request timed out")
-                case .invalidResponse:
-                    // Got a response, key works
-                    apiKeyStatus = .valid
-                }
-            } catch {
-                apiKeyStatus = .invalid(message: error.localizedDescription)
-            }
-            isVerifying = false
         }
     }
 
@@ -530,12 +441,6 @@ struct SettingsView: View {
             return innerHooks.contains { ($0["command"] as? String)?.contains("wtmux-hook") == true }
         }
     }
-}
-
-private enum APIKeyStatus: Equatable {
-    case unknown
-    case valid
-    case invalid(message: String)
 }
 
 private struct ThemeSwatchView: View {

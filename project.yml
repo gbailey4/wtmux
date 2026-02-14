@@ -20,8 +20,6 @@ packages:
     path: Packages/WTTerminal
   WTDiff:
     path: Packages/WTDiff
-  WTLLM:
-    path: Packages/WTLLM
 
 targets:
   WTMux:
@@ -55,7 +53,6 @@ targets:
       - package: WTProcess
       - package: WTTerminal
       - package: WTDiff
-      - package: WTLLM
     info:
       path: WTMux/Info.plist
       properties:

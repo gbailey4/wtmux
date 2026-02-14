@@ -65,6 +65,8 @@ public struct ProjectImportService {
                 project.worktreeBasePath = wtBase
             }
 
+            project.needsClaudeConfig = false
+
             if let profile = project.profile {
                 profile.envFilesToCopy = config.envFilesToCopy
                 profile.setupCommands = config.setupCommands

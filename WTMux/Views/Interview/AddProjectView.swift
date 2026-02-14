@@ -3,7 +3,6 @@ import SwiftUI
 import SwiftData
 import WTCore
 import WTGit
-import WTLLM
 import WTTerminal
 import WTTransport
 import os.log
@@ -39,12 +38,11 @@ struct AddProjectView: View {
     @State private var detectedWorktrees: [GitWorktreeInfo] = []
     @State private var selectedWorktreePaths: Set<String> = []
 
+    @State private var availableBranches: [String] = []
+    @State private var repoError: String?
+
     @State private var errorMessage: String?
     @State private var isLoading = false
-
-    // AI analysis
-    @AppStorage("llmModel") private var llmModel = "claude-sonnet-4-5-20250929"
-    @State private var analysisManager = AIAnalysisManager()
 
     // Configure with Claude
     @State private var showFirstWorktreeAlert = false
@@ -108,18 +106,32 @@ struct AddProjectView: View {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                if step != .selectRepo {
-                    Button("Back") { goBack() }
-                }
-                Button(step == .review ? "Create Project" : "Next") {
-                    if step == .review {
-                        createProject()
-                    } else {
+                if step == .selectRepo {
+                    Button("Manual Setup") {
                         goNext()
                     }
+                    .disabled(!canAdvance)
+                    Button("Configure with Claude") {
+                        if worktreeBasePath.isEmpty {
+                            worktreeBasePath = "\(repoPath)-worktrees"
+                        }
+                        firstWorktreeBranch = ""
+                        showFirstWorktreeAlert = true
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canAdvance)
+                } else {
+                    Button("Back") { goBack() }
+                    Button(step == .review ? "Create Project" : "Next") {
+                        if step == .review {
+                            createProject()
+                        } else {
+                            goNext()
+                        }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canAdvance)
                 }
-                .keyboardShortcut(.defaultAction)
-                .disabled(!canAdvance)
             }
             .padding()
         }
@@ -141,30 +153,50 @@ struct AddProjectView: View {
             Section("Repository") {
                 HStack {
                     TextField("Repository Path", text: $repoPath)
-                        .textFieldStyle(.roundedBorder)
-                        .multilineTextAlignment(.leading)
                     Button("Browse...") {
                         selectFolder()
                     }
+                    .fixedSize()
+                }
+
+                if let repoError {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.yellow)
+                        Text(repoError)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Initialize Repository") {
+                            initializeRepo()
+                        }
+                    }
+                    .font(.caption)
                 }
 
                 TextField("Project Name", text: $projectName)
-                    .textFieldStyle(.roundedBorder)
-                    .multilineTextAlignment(.leading)
 
-                TextField("Default Branch", text: $defaultBranch)
-                    .textFieldStyle(.roundedBorder)
-                    .multilineTextAlignment(.leading)
+                Picker("Default Branch", selection: $defaultBranch) {
+                    if availableBranches.isEmpty {
+                        Text("Select a repository first").tag("main")
+                    }
+                    ForEach(availableBranches, id: \.self) { branch in
+                        Text(branch).tag(branch)
+                    }
+                }
+                .disabled(availableBranches.isEmpty)
 
                 HStack {
                     TextField("Worktree Base Path", text: $worktreeBasePath)
-                        .textFieldStyle(.roundedBorder)
-                        .multilineTextAlignment(.leading)
                     Button("Browse...") {
                         browseWorktreeBasePath()
                     }
+                    .fixedSize()
                 }
+                .disabled(availableBranches.isEmpty)
                 .help("Directory where worktrees will be created")
+                Text("Defaults to a sibling directory (e.g. repo-worktrees/). Should be outside the repository.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Connection") {
@@ -172,50 +204,22 @@ struct AddProjectView: View {
 
                 if isRemote {
                     TextField("SSH Host", text: $sshHost)
-                        .textFieldStyle(.roundedBorder)
-                        .multilineTextAlignment(.leading)
                     TextField("SSH User", text: $sshUser)
-                        .textFieldStyle(.roundedBorder)
-                        .multilineTextAlignment(.leading)
                     TextField("SSH Port", text: $sshPort)
-                        .textFieldStyle(.roundedBorder)
-                        .multilineTextAlignment(.leading)
                 }
             }
+
         }
         .formStyle(.grouped)
         .padding()
+        .task(id: repoPath) {
+            await loadBranches()
+        }
     }
 
     @ViewBuilder
     private var configureProfileStep: some View {
         Form {
-            Section {
-                Button {
-                    firstWorktreeBranch = ""
-                    showFirstWorktreeAlert = true
-                } label: {
-                    HStack {
-                        Image(systemName: "terminal")
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Configure with Claude")
-                                .fontWeight(.medium)
-                            Text("Create a worktree and let Claude CLI auto-configure the project")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-
-            Section {
-                aiAnalysisButton
-            }
-
             if !detectedWorktrees.isEmpty {
                 Section("Existing Worktrees") {
                     ForEach(detectedWorktrees, id: \.path) { wt in
@@ -263,8 +267,6 @@ struct AddProjectView: View {
                 ForEach(Array(setupCommands.enumerated()), id: \.offset) { index, _ in
                     HStack {
                         TextField("Command", text: $setupCommands[index])
-                            .textFieldStyle(.roundedBorder)
-                            .multilineTextAlignment(.leading)
                             .font(.system(.body, design: .monospaced))
                         Button(role: .destructive) {
                             setupCommands.remove(at: index)
@@ -285,8 +287,6 @@ struct AddProjectView: View {
                 Toggle("Start Claude in new terminals", isOn: $startClaudeInTerminals)
                 if !startClaudeInTerminals {
                     TextField("Start Command", text: $terminalStartCommand)
-                        .textFieldStyle(.roundedBorder)
-                        .multilineTextAlignment(.leading)
                         .font(.system(.body, design: .monospaced))
                     Text("Runs automatically in every new terminal tab")
                         .font(.caption)
@@ -299,8 +299,6 @@ struct AddProjectView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             TextField("Name", text: $runConfigurations[index].name)
-                                .textFieldStyle(.roundedBorder)
-                                .multilineTextAlignment(.leading)
                             Button(role: .destructive) {
                                 runConfigurations.remove(at: index)
                             } label: {
@@ -309,13 +307,9 @@ struct AddProjectView: View {
                             .buttonStyle(.plain)
                         }
                         TextField("Command", text: $runConfigurations[index].command)
-                            .textFieldStyle(.roundedBorder)
-                            .multilineTextAlignment(.leading)
                             .font(.system(.body, design: .monospaced))
                         HStack {
                             TextField("Port", text: $runConfigurations[index].portString)
-                                .textFieldStyle(.roundedBorder)
-                                .multilineTextAlignment(.leading)
                                 .frame(width: 80)
                             Toggle("Default runner", isOn: $runConfigurations[index].autoStart)
                         }
@@ -332,65 +326,6 @@ struct AddProjectView: View {
         }
         .formStyle(.grouped)
         .padding()
-        .sheet(isPresented: $analysisManager.showAnalysisPreview) {
-            if let analysis = analysisManager.pendingAnalysis {
-                AIAnalysisPreviewSheet(analysis: analysis) {
-                    applyAnalysis(analysis)
-                    analysisManager.dismissPreview()
-                } onCancel: {
-                    analysisManager.dismissPreview()
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var aiAnalysisButton: some View {
-        if let apiKey = KeychainStore.loadAPIKey(for: .claude) {
-            switch analysisManager.state {
-            case .idle, .failed:
-                Button {
-                    analysisManager.runAnalysis(apiKey: apiKey, model: llmModel, repoPath: repoPath)
-                } label: {
-                    Label("Auto-detect with AI", systemImage: "sparkles")
-                }
-                if case .failed(let message) = analysisManager.state {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                    Button("Retry") {
-                        analysisManager.runAnalysis(apiKey: apiKey, model: llmModel, repoPath: repoPath)
-                    }
-                    .font(.caption)
-                }
-            case .gatheringContext:
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Gathering project files...")
-                        .foregroundStyle(.secondary)
-                }
-            case .analyzing:
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Analyzing project...")
-                        .foregroundStyle(.secondary)
-                }
-            }
-        } else {
-            HStack {
-                Image(systemName: "sparkles")
-                    .foregroundStyle(.secondary)
-                Text("Configure an AI provider in Settings to auto-detect project configuration")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                SettingsLink {
-                    Text("Open Settings")
-                        .font(.caption)
-                }
-            }
-        }
     }
 
     @ViewBuilder
@@ -454,7 +389,7 @@ struct AddProjectView: View {
     private var canAdvance: Bool {
         switch step {
         case .selectRepo:
-            return !repoPath.isEmpty && !projectName.isEmpty
+            return !repoPath.isEmpty && !projectName.isEmpty && repoError == nil
         case .configureProfile:
             return true
         case .review:
@@ -500,15 +435,70 @@ struct AddProjectView: View {
         }
     }
 
+    private func loadBranches() async {
+        let path = repoPath.trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else {
+            availableBranches = []
+            repoError = nil
+            return
+        }
+
+        let transport = LocalTransport()
+        let git = GitService(transport: transport, repoPath: path)
+        do {
+            let branches = try await git.branches()
+            availableBranches = branches
+            repoError = nil
+
+            let detected = try await git.defaultBranch()
+            if availableBranches.contains(detected) {
+                defaultBranch = detected
+            } else if let first = branches.first {
+                defaultBranch = first
+            }
+        } catch {
+            availableBranches = []
+            repoError = "Not a git repository"
+        }
+
+        // Auto-fill project name from folder name
+        if projectName.isEmpty {
+            projectName = URL(fileURLWithPath: path).lastPathComponent
+        }
+    }
+
+    private func initializeRepo() {
+        let path = repoPath.trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty else { return }
+
+        Task {
+            let transport = LocalTransport()
+            do {
+                let result = try await transport.execute(
+                    [GitService.resolveGitPath(), "init"],
+                    in: path
+                )
+                if result.succeeded {
+                    await loadBranches()
+                } else {
+                    repoError = "Failed to initialize: \(result.stderr)"
+                }
+            } catch {
+                repoError = "Failed to initialize: \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func detectProjectConfig() async {
         isLoading = true
         defer { isLoading = false }
 
         let transport = LocalTransport()
 
-        // Detect default branch
         let git = GitService(transport: transport, repoPath: repoPath)
-        if let branch = try? await git.defaultBranch() {
+
+        // Only detect default branch if not already set from the picker
+        if availableBranches.isEmpty, let branch = try? await git.defaultBranch() {
             defaultBranch = branch
         }
 
@@ -588,19 +578,6 @@ struct AddProjectView: View {
         return nil
     }
 
-    private func applyAnalysis(_ analysis: ProjectAnalysis) {
-        detectedEnvFiles = analysis.envFilesToCopy
-        selectedEnvFiles = Set(analysis.envFilesToCopy)
-        setupCommands = analysis.setupCommands
-        if analysis.terminalStartCommand == "claude" {
-            startClaudeInTerminals = true
-            terminalStartCommand = ""
-        } else {
-            terminalStartCommand = analysis.terminalStartCommand ?? ""
-        }
-        runConfigurations = analysis.toEditableRunConfigs()
-    }
-
     /// Returns an existing project that already uses this `repoPath`, or `nil`.
     private func existingProject(for path: String) -> Project? {
         let predicate = #Predicate<Project> { $0.repoPath == path }
@@ -649,6 +626,8 @@ struct AddProjectView: View {
                 )
                 modelContext.insert(project)
             }
+            project.needsClaudeConfig = true
+
             if isRemote {
                 project.sshHost = sshHost
                 project.sshUser = sshUser
@@ -680,11 +659,11 @@ struct AddProjectView: View {
             }
 
             // 4. Pre-create terminal session with claude command
-            let claudeCommand = "claude \"Analyze the repo at \(repoPath) and use the wtmux MCP configure_project tool to configure it. Use \(repoPath) as the repoPath. Determine appropriate setup commands, run configurations (dev servers with ports), env files to copy between worktrees, and terminal start command. Before calling configure_project, present the proposed configuration to the user for review. If they give feedback, incorporate it and present the updated configuration again for approval. Only call configure_project once the user confirms.\""
-            _ = terminalSessionManager.createTab(
-                forWorktree: worktreePath,
+            ClaudeConfigHelper.openConfigTerminal(
+                terminalSessionManager: terminalSessionManager,
+                worktreeId: worktreePath,
                 workingDirectory: worktreePath,
-                initialCommand: claudeCommand
+                repoPath: repoPath
             )
 
             // 5. Navigate to the new worktree and dismiss
@@ -829,100 +808,3 @@ struct AddProjectView: View {
     }
 }
 
-struct AIAnalysisPreviewSheet: View {
-    let analysis: ProjectAnalysis
-    let onApply: () -> Void
-    let onCancel: () -> Void
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Text("AI Analysis Results")
-                .font(.headline)
-                .padding()
-
-            if let projectType = analysis.projectType {
-                Text("Detected: \(projectType)")
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 8)
-            }
-
-            Divider()
-
-            Form {
-                if !analysis.envFilesToCopy.isEmpty {
-                    Section("Environment Files") {
-                        ForEach(analysis.envFilesToCopy, id: \.self) { file in
-                            Text(file)
-                                .font(.system(.body, design: .monospaced))
-                        }
-                    }
-                }
-
-                if !analysis.setupCommands.isEmpty {
-                    Section("Setup Commands") {
-                        ForEach(analysis.setupCommands, id: \.self) { cmd in
-                            Text(cmd)
-                                .font(.system(.body, design: .monospaced))
-                        }
-                    }
-                }
-
-                if let startCmd = analysis.terminalStartCommand {
-                    Section("Terminal Start Command") {
-                        Text(startCmd)
-                            .font(.system(.body, design: .monospaced))
-                    }
-                }
-
-                if !analysis.runConfigurations.isEmpty {
-                    Section("Run Configurations") {
-                        ForEach(analysis.runConfigurations) { rc in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(rc.name)
-                                    .font(.headline)
-                                Text(rc.command)
-                                    .font(.system(.body, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                                HStack {
-                                    if let port = rc.port {
-                                        Text("Port: \(port)")
-                                            .font(.caption)
-                                    }
-                                    if rc.autoStart {
-                                        Text("Default")
-                                            .font(.caption)
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
-                                            .background(.blue.opacity(0.15))
-                                            .clipShape(Capsule())
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if let notes = analysis.notes {
-                    Section("Notes") {
-                        Text(notes)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .formStyle(.grouped)
-
-            Divider()
-
-            HStack {
-                Button("Cancel", action: onCancel)
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("Apply", action: onApply)
-                    .keyboardShortcut(.defaultAction)
-            }
-            .padding()
-        }
-        .frame(width: 450, height: 500)
-    }
-}
