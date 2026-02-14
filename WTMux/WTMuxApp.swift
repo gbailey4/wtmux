@@ -1,12 +1,37 @@
 import SwiftUI
 import SwiftData
 import WTCore
+import WTTerminal
 import os.log
 
 private let logger = Logger(subsystem: "com.wtmux", category: "App")
 
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    var terminalSessionManager: TerminalSessionManager?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let manager = terminalSessionManager,
+              manager.hasAnyRunningProcesses() else {
+            return .terminateNow
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Quit WTMux?"
+        alert.informativeText = "There are running terminal processes. Quitting will terminate them."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Cancel")
+
+        let response = alert.runModal()
+        return response == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+    }
+}
+
 @main
 struct WTMuxApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
     let modelContainer: ModelContainer
     private let initError: String?
 
@@ -54,11 +79,11 @@ struct WTMuxApp: App {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
-                    ContentView()
+                    ContentView(appDelegate: appDelegate)
                 }
                 .padding()
             } else {
-                ContentView()
+                ContentView(appDelegate: appDelegate)
             }
         }
         .modelContainer(modelContainer)

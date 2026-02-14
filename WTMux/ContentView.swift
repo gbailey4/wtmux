@@ -32,8 +32,10 @@ final class ProjectImportObserver {
 }
 
 struct ContentView: View {
+    let appDelegate: AppDelegate
+
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \Project.name) private var projects: [Project]
+    @Query(sort: \Project.sortOrder) private var projects: [Project]
 
     @State private var selectedWorktreeID: String?
     @State private var showingAddProject = false
@@ -134,8 +136,10 @@ struct ContentView: View {
             }
         }
         .task {
+            appDelegate.terminalSessionManager = terminalSessionManager
             await checkGitAvailability()
             backfillProjectColors()
+            backfillSortOrders()
         }
         .sheet(isPresented: $showingAddProject) {
             AddProjectView(
@@ -202,6 +206,29 @@ struct ContentView: View {
         } catch {
             gitAvailable = false
         }
+    }
+
+    private func backfillSortOrders() {
+        // Backfill projects: if all have sortOrder 0 and there's more than one, assign sequential values
+        if projects.count > 1 && projects.allSatisfy({ $0.sortOrder == 0 }) {
+            let sorted = projects.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            for (index, project) in sorted.enumerated() {
+                project.sortOrder = index
+            }
+        }
+
+        // Backfill worktrees within each project
+        for project in projects {
+            let worktrees = project.worktrees
+            if worktrees.count > 1 && worktrees.allSatisfy({ $0.sortOrder == 0 }) {
+                let sorted = worktrees.sorted { $0.createdAt < $1.createdAt }
+                for (index, worktree) in sorted.enumerated() {
+                    worktree.sortOrder = index
+                }
+            }
+        }
+
+        try? modelContext.save()
     }
 
     private func backfillProjectColors() {

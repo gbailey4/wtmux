@@ -127,6 +127,19 @@ public final class TerminalSessionManager: @unchecked Sendable {
         sessions.removeValue(forKey: id)
     }
 
+    /// Returns `true` if any session has an active process — either a runner
+    /// in the `.running` state or a terminal tab with child processes.
+    public func hasAnyRunningProcesses() -> Bool {
+        for session in sessions.values {
+            if SessionID.isRunner(session.id) {
+                if session.state == .running { return true }
+            } else {
+                if session.terminalView?.hasChildProcesses() == true { return true }
+            }
+        }
+        return false
+    }
+
     public func removeAll() {
         stopPortScanning()
         for session in sessions.values {
