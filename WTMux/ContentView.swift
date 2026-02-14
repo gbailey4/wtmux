@@ -158,6 +158,7 @@ struct ContentView: View {
             importProject(repoPath: repoPath, config: config)
         }
         .task { registerWorktreePaths() }
+        .task { await pollForConfigFiles() }
         .onChange(of: projects) { registerWorktreePaths() }
         .onChange(of: totalWorktreeCount) { registerWorktreePaths() }
     }
@@ -194,6 +195,19 @@ struct ContentView: View {
             }
             let importService = ProjectImportService()
             importService.importProject(repoPath: repoPath, config: resolvedConfig, in: modelContext)
+        }
+    }
+
+    private func pollForConfigFiles() async {
+        let configService = ConfigService()
+        let importService = ProjectImportService()
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(2))
+            for project in projects where project.needsClaudeConfig == true {
+                if let config = await configService.readConfig(forRepo: project.repoPath) {
+                    importService.importProject(repoPath: project.repoPath, config: config, in: modelContext)
+                }
+            }
         }
     }
 
