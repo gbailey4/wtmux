@@ -34,6 +34,10 @@ struct AddProjectView: View {
     @State private var terminalStartCommand = ""
     @State private var runConfigurations: [EditableRunConfig] = []
 
+    // Existing worktrees
+    @State private var detectedWorktrees: [GitWorktreeInfo] = []
+    @State private var selectedWorktreePaths: Set<String> = []
+
     @State private var errorMessage: String?
     @State private var isLoading = false
 
@@ -211,6 +215,28 @@ struct AddProjectView: View {
                 aiAnalysisButton
             }
 
+            if !detectedWorktrees.isEmpty {
+                Section("Existing Worktrees") {
+                    ForEach(detectedWorktrees, id: \.path) { wt in
+                        Toggle(isOn: Binding(
+                            get: { selectedWorktreePaths.contains(wt.path) },
+                            set: { selected in
+                                if selected { selectedWorktreePaths.insert(wt.path) }
+                                else { selectedWorktreePaths.remove(wt.path) }
+                            }
+                        )) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(wt.branch ?? URL(fileURLWithPath: wt.path).lastPathComponent)
+                                    .font(.body)
+                                Text(wt.path)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+
             Section("Environment Files to Copy") {
                 ForEach(detectedEnvFiles, id: \.self) { file in
                     Toggle(file, isOn: Binding(
@@ -373,6 +399,17 @@ struct AddProjectView: View {
                 LabeledContent("Worktrees", value: worktreeBasePath)
             }
 
+            if !selectedWorktreePaths.isEmpty {
+                Section("Worktrees to Import") {
+                    ForEach(detectedWorktrees.filter({ selectedWorktreePaths.contains($0.path) }), id: \.path) { wt in
+                        LabeledContent(
+                            wt.branch ?? URL(fileURLWithPath: wt.path).lastPathComponent,
+                            value: wt.path
+                        )
+                    }
+                }
+            }
+
             if !selectedEnvFiles.isEmpty {
                 Section("Files to Copy") {
                     ForEach(Array(selectedEnvFiles), id: \.self) { file in
@@ -469,6 +506,13 @@ struct AddProjectView: View {
         let git = GitService(transport: transport, repoPath: repoPath)
         if let branch = try? await git.defaultBranch() {
             defaultBranch = branch
+        }
+
+        // Detect existing worktrees
+        if let worktrees = try? await git.worktreeList() {
+            let filtered = worktrees.filter { !$0.isBare && $0.path != repoPath }
+            detectedWorktrees = filtered
+            selectedWorktreePaths = Set(filtered.map(\.path))
         }
 
         // Detect .env files recursively
@@ -685,6 +729,21 @@ struct AddProjectView: View {
 
         profile.project = project
         project.profile = profile
+
+        // Import selected existing worktrees
+        let existingPaths = Set(project.worktrees.map(\.path))
+        for wt in detectedWorktrees where selectedWorktreePaths.contains(wt.path) {
+            guard !existingPaths.contains(wt.path) else { continue }
+            let branchName = wt.branch ?? URL(fileURLWithPath: wt.path).lastPathComponent
+            let worktree = Worktree(
+                branchName: branchName,
+                path: wt.path,
+                baseBranch: defaultBranch,
+                status: .ready
+            )
+            worktree.project = project
+        }
+
         do {
             try modelContext.save()
         } catch {

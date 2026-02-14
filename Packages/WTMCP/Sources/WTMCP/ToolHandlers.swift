@@ -234,16 +234,14 @@ struct ToolHandlers: Sendable {
             )
         }
 
-        // Trigger WTEasy app to import the project via URL scheme
-        if let encodedPath = repoPath.addingPercentEncoding(
-            withAllowedCharacters: .urlQueryAllowed
-        ) {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-            process.arguments = ["-g", "wteasy://import-project?path=\(encodedPath)"]
-            try? process.run()
-            process.waitUntilExit()
-        }
+        // Notify the running WTEasy app to import the project via
+        // DistributedNotificationCenter (cross-process, no window side-effects).
+        DistributedNotificationCenter.default().postNotificationName(
+            .init("com.grahampark.wteasy.importProject"),
+            object: repoPath,
+            userInfo: nil,
+            deliverImmediately: true
+        )
 
         var summary = "Configured \(repoPath):\n"
         if !envFiles.isEmpty {

@@ -7,6 +7,8 @@ private let logger = Logger(subsystem: "com.wteasy", category: "ProjectImportSer
 /// Creates or updates a SwiftData `Project` from a `ProjectConfig` and repo path.
 @MainActor
 public struct ProjectImportService {
+    private let configService = ConfigService()
+
     public init() {}
 
     /// Import a project from its config file. Creates a new project or updates an existing one.
@@ -84,6 +86,20 @@ public struct ProjectImportService {
                     )
                     runConfig.profile = profile
                     profile.runConfigurations.append(runConfig)
+                }
+            }
+
+            // If the config came from a worktree path, copy it to the canonical repo root
+            // so CreateWorktreeView and WorktreeDetailView can find it.
+            if repoPath != project.repoPath {
+                let canonicalPath = project.repoPath
+                Task.detached {
+                    do {
+                        try await configService.writeConfig(config, forRepo: canonicalPath)
+                        logger.info("Copied config to canonical repo path: \(canonicalPath)")
+                    } catch {
+                        logger.warning("Failed to copy config to '\(canonicalPath)': \(error.localizedDescription)")
+                    }
                 }
             }
         } else {

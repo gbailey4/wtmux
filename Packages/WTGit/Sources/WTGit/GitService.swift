@@ -19,7 +19,7 @@ public actor GitService {
     }
 
     /// Resolves the git binary path by checking common install locations.
-    private static func resolveGitPath() -> String {
+    public static func resolveGitPath() -> String {
         let candidates = [
             "/opt/homebrew/bin/git",  // Apple Silicon Homebrew
             "/usr/local/bin/git",     // Intel Homebrew / manual installs
@@ -100,6 +100,14 @@ public actor GitService {
         var args = [gitPath, "worktree", "remove", path]
         if force { args.insert("--force", at: 3) }
         let result = try await transport.execute(args, in: repoPath)
+        guard result.succeeded else {
+            throw GitError.commandFailed(result.stderr)
+        }
+    }
+
+    public func branchDelete(name: String, force: Bool = false) async throws {
+        let flag = force ? "-D" : "-d"
+        let result = try await transport.execute([gitPath, "branch", flag, name], in: repoPath)
         guard result.succeeded else {
             throw GitError.commandFailed(result.stderr)
         }

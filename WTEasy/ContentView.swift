@@ -1,7 +1,28 @@
+import AppKit
 import SwiftUI
 import SwiftData
 import WTCore
+import WTGit
 import WTTerminal
+import WTTransport
+
+@MainActor @Observable
+final class ProjectImportObserver {
+    var pendingImportPath: String?
+
+    init() {
+        DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.grahampark.wteasy.importProject"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let path = notification.object as? String
+            MainActor.assumeIsolated {
+                self?.pendingImportPath = path
+            }
+        }
+    }
+}
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
@@ -15,6 +36,9 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var terminalSessionManager = TerminalSessionManager()
     @State private var claudeStatusManager = ClaudeStatusManager()
+    @State private var importObserver = ProjectImportObserver()
+    @State private var gitAvailable: Bool? = nil
+    @State private var gitCheckDismissed = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -67,6 +91,42 @@ struct ContentView: View {
                 .help("Toggle Diff Panel (Cmd+Shift+D)")
             }
         }
+        .safeAreaInset(edge: .top) {
+            if gitAvailable == false && !gitCheckDismissed {
+                HStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.yellow)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Git Not Found")
+                            .font(.subheadline.bold())
+                        Text("Install Xcode Command Line Tools to use WTEasy.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Copy Command") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString("xcode-select --install", forType: .string)
+                    }
+                    .controlSize(.small)
+                    Button("Retry") {
+                        Task { await checkGitAvailability() }
+                    }
+                    .controlSize(.small)
+                    Button {
+                        gitCheckDismissed = true
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.subheadline)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(10)
+                .background(.yellow.opacity(0.15))
+                .overlay(alignment: .bottom) { Divider() }
+            }
+        }
+        .task { await checkGitAvailability() }
         .sheet(isPresented: $showingAddProject) {
             AddProjectView(
                 selectedWorktreeID: $selectedWorktreeID,
@@ -75,6 +135,11 @@ struct ContentView: View {
         }
         .onOpenURL { url in
             handleImportURL(url)
+        }
+        .onChange(of: importObserver.pendingImportPath) { _, newPath in
+            guard let repoPath = newPath, !repoPath.isEmpty else { return }
+            importObserver.pendingImportPath = nil
+            importProject(repoPath: repoPath)
         }
         .task { registerWorktreePaths() }
         .onChange(of: projects) { registerWorktreePaths() }
@@ -99,12 +164,26 @@ struct ContentView: View {
               !repoPath.isEmpty else {
             return
         }
+        importProject(repoPath: repoPath)
+    }
 
+    private func importProject(repoPath: String) {
         Task {
             let configService = ConfigService()
             let config = await configService.readConfig(forRepo: repoPath) ?? ProjectConfig()
             let importService = ProjectImportService()
             importService.importProject(repoPath: repoPath, config: config, in: modelContext)
+        }
+    }
+
+    private func checkGitAvailability() async {
+        let gitPath = GitService.resolveGitPath()
+        let transport = LocalTransport()
+        do {
+            let result = try await transport.execute([gitPath, "--version"], in: "/")
+            gitAvailable = result.succeeded
+        } catch {
+            gitAvailable = false
         }
     }
 

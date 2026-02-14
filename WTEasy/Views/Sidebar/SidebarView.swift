@@ -21,9 +21,13 @@ struct SidebarView: View {
     @State private var worktreeTargetProject: Project?
     @State private var editingProject: Project?
     @State private var worktreeToDelete: Worktree?
-    @State private var showDeleteConfirmation = false
+    @State private var deleteWorktreeBranch = true
     @State private var deleteError: String?
     @State private var showDeleteError = false
+    @State private var projectToDelete: Project?
+    @State private var deleteProjectBranches = true
+    @State private var projectDeleteError: String?
+    @State private var showProjectDeleteError = false
     @State private var showRunnerConflictAlert = false
     @State private var conflictingWorktreeName = ""
     @State private var conflictingPorts: [Int] = []
@@ -75,8 +79,9 @@ struct SidebarView: View {
                             editingProject = project
                         }
                         Divider()
-                        Button("Delete Project", role: .destructive) {
-                            deleteProject(project)
+                        Button("Delete Project...", role: .destructive) {
+                            deleteProjectBranches = true
+                            projectToDelete = project
                         }
                     }
                 }
@@ -102,24 +107,48 @@ struct SidebarView: View {
         .sheet(item: $editingProject) { project in
             ProjectSettingsView(project: project)
         }
-        .alert("Delete Worktree?", isPresented: $showDeleteConfirmation) {
-            Button("Delete", role: .destructive) {
-                if let wt = worktreeToDelete {
-                    Task { await deleteWorktreeWithGit(wt) }
+        .sheet(item: $worktreeToDelete) { wt in
+            DeleteWorktreeSheet(
+                worktreeName: wt.branchName,
+                deleteBranch: $deleteWorktreeBranch,
+                onDelete: {
+                    let shouldDeleteBranch = deleteWorktreeBranch
+                    worktreeToDelete = nil
+                    Task { await deleteWorktreeWithGit(wt, deleteBranch: shouldDeleteBranch) }
+                },
+                onCancel: {
+                    worktreeToDelete = nil
                 }
-            }
-            Button("Cancel", role: .cancel) {
-                worktreeToDelete = nil
-            }
-        } message: {
-            if let wt = worktreeToDelete {
-                Text("This will remove the worktree \"\(wt.branchName)\" and delete its directory from disk. Any uncommitted changes will be lost.")
-            }
+            )
         }
         .alert("Delete Failed", isPresented: $showDeleteError) {
             Button("OK") { deleteError = nil }
         } message: {
             Text(deleteError ?? "An unknown error occurred.")
+        }
+        .sheet(item: $projectToDelete) { project in
+            DeleteProjectSheet(
+                projectName: project.name,
+                worktreeCount: project.worktrees.count,
+                deleteBranches: $deleteProjectBranches,
+                onDeleteEverything: {
+                    let shouldDeleteBranches = deleteProjectBranches
+                    projectToDelete = nil
+                    Task { await deleteProjectWithWorktrees(project, deleteBranches: shouldDeleteBranches) }
+                },
+                onRemoveFromApp: {
+                    projectToDelete = nil
+                    deleteProjectOnly(project)
+                },
+                onCancel: {
+                    projectToDelete = nil
+                }
+            )
+        }
+        .alert("Project Deletion Error", isPresented: $showProjectDeleteError) {
+            Button("OK") { projectDeleteError = nil }
+        } message: {
+            Text(projectDeleteError ?? "An unknown error occurred.")
         }
         .alert("Runners Already Active", isPresented: $showRunnerConflictAlert) {
             Button("Stop & Switch") {
@@ -196,8 +225,8 @@ struct SidebarView: View {
         Divider()
 
         Button(role: .destructive) {
+            deleteWorktreeBranch = true
             worktreeToDelete = worktree
-            showDeleteConfirmation = true
         } label: {
             Label("Delete Worktree...", systemImage: "trash")
         }
@@ -285,7 +314,10 @@ struct SidebarView: View {
 
     // MARK: - Delete
 
-    private func deleteWorktreeWithGit(_ worktree: Worktree) async {
+    private func deleteWorktreeWithGit(_ worktree: Worktree, deleteBranch: Bool = false) async {
+        let branchName = worktree.branchName
+        let repoPath = worktree.project?.repoPath
+
         // 1. Stop and remove all runner sessions
         for session in terminalSessionManager.runnerSessions(forWorktree: worktree.path) {
             terminalSessionManager.stopSession(id: session.id)
@@ -298,7 +330,7 @@ struct SidebarView: View {
         }
 
         // 3. Call git worktree remove
-        if let repoPath = worktree.project?.repoPath {
+        if let repoPath {
             let git = GitService(transport: LocalTransport(), repoPath: repoPath)
             do {
                 try await git.worktreeRemove(path: worktree.path)
@@ -315,9 +347,18 @@ struct SidebarView: View {
                     return
                 }
             }
+
+            // 4. Optionally delete branch
+            if deleteBranch {
+                do {
+                    try await git.branchDelete(name: branchName)
+                } catch {
+                    logger.warning("Could not delete branch '\(branchName)': \(error.localizedDescription)")
+                }
+            }
         }
 
-        // 4. Delete from SwiftData and clear selection
+        // 5. Delete from SwiftData and clear selection
         await MainActor.run {
             if selectedWorktreeID == worktree.path {
                 selectedWorktreeID = nil
@@ -326,18 +367,89 @@ struct SidebarView: View {
             do {
                 try modelContext.save()
             } catch {
-                logger.error("Failed to save after deleting worktree '\(worktree.branchName)': \(error.localizedDescription)")
+                logger.error("Failed to save after deleting worktree '\(branchName)': \(error.localizedDescription)")
             }
             worktreeToDelete = nil
         }
     }
 
-    private func deleteProject(_ project: Project) {
+    private func deleteProjectOnly(_ project: Project) {
+        // Clean up terminal sessions for all worktrees
+        for worktree in project.worktrees {
+            for session in terminalSessionManager.runnerSessions(forWorktree: worktree.path) {
+                terminalSessionManager.stopSession(id: session.id)
+            }
+            terminalSessionManager.removeRunnerSessions(forWorktree: worktree.path)
+            for session in terminalSessionManager.sessions(forWorktree: worktree.path) {
+                terminalSessionManager.removeTab(sessionId: session.id)
+            }
+            if selectedWorktreeID == worktree.path {
+                selectedWorktreeID = nil
+            }
+        }
+
         modelContext.delete(project)
         do {
             try modelContext.save()
         } catch {
             logger.error("Failed to save after deleting project '\(project.name)': \(error.localizedDescription)")
+        }
+        projectToDelete = nil
+    }
+
+    private func deleteProjectWithWorktrees(_ project: Project, deleteBranches: Bool) async {
+        var errors: [String] = []
+        let repoPath = project.repoPath
+        let git = GitService(transport: LocalTransport(), repoPath: repoPath)
+        let worktrees = project.worktrees
+
+        for worktree in worktrees {
+            // Stop runners and terminals
+            for session in terminalSessionManager.runnerSessions(forWorktree: worktree.path) {
+                terminalSessionManager.stopSession(id: session.id)
+            }
+            terminalSessionManager.removeRunnerSessions(forWorktree: worktree.path)
+            for session in terminalSessionManager.sessions(forWorktree: worktree.path) {
+                terminalSessionManager.removeTab(sessionId: session.id)
+            }
+
+            // Remove git worktree
+            do {
+                try await git.worktreeRemove(path: worktree.path)
+            } catch {
+                do {
+                    try await git.worktreeRemove(path: worktree.path, force: true)
+                } catch {
+                    errors.append("Worktree \(worktree.branchName): \(error.localizedDescription)")
+                }
+            }
+
+            // Optionally delete branch
+            if deleteBranches {
+                do {
+                    try await git.branchDelete(name: worktree.branchName)
+                } catch {
+                    logger.warning("Could not delete branch '\(worktree.branchName)': \(error.localizedDescription)")
+                }
+            }
+        }
+
+        await MainActor.run {
+            if let sel = selectedWorktreeID, worktrees.contains(where: { $0.path == sel }) {
+                selectedWorktreeID = nil
+            }
+            modelContext.delete(project)
+            do {
+                try modelContext.save()
+            } catch {
+                logger.error("Failed to save after deleting project '\(project.name)': \(error.localizedDescription)")
+            }
+            projectToDelete = nil
+
+            if !errors.isEmpty {
+                projectDeleteError = "Some items could not be removed:\n" + errors.joined(separator: "\n")
+                showProjectDeleteError = true
+            }
         }
     }
 }
@@ -487,5 +599,95 @@ struct WorktreeRow: View {
                 .font(.system(size: 10))
                 .foregroundStyle(.green)
         }
+    }
+}
+
+// MARK: - Delete Worktree Sheet
+
+struct DeleteWorktreeSheet: View {
+    let worktreeName: String
+    @Binding var deleteBranch: Bool
+    let onDelete: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "trash")
+                .font(.largeTitle)
+                .foregroundStyle(.red)
+
+            Text("Delete Worktree?")
+                .font(.headline)
+
+            Text("This will remove the worktree \"\(worktreeName)\" and delete its directory from disk. Any uncommitted changes will be lost.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Toggle("Also delete branch \"\(worktreeName)\"", isOn: $deleteBranch)
+                .padding(.horizontal)
+
+            HStack {
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Delete", role: .destructive, action: onDelete)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 380)
+    }
+}
+
+// MARK: - Delete Project Sheet
+
+struct DeleteProjectSheet: View {
+    let projectName: String
+    let worktreeCount: Int
+    @Binding var deleteBranches: Bool
+    let onDeleteEverything: () -> Void
+    let onRemoveFromApp: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "trash")
+                .font(.largeTitle)
+                .foregroundStyle(.red)
+
+            Text("Delete Project \"\(projectName)\"?")
+                .font(.headline)
+
+            if worktreeCount > 0 {
+                Text("This project has \(worktreeCount) worktree\(worktreeCount == 1 ? "" : "s"). You can remove all worktrees from disk or just remove the project from WTEasy.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Toggle("Also delete worktree branches", isOn: $deleteBranches)
+                    .padding(.horizontal)
+            } else {
+                Text("This will remove the project from WTEasy.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                if worktreeCount > 0 {
+                    Button("Remove from App Only", action: onRemoveFromApp)
+                    Button("Delete Everything", role: .destructive, action: onDeleteEverything)
+                        .keyboardShortcut(.defaultAction)
+                } else {
+                    Button("Delete", role: .destructive, action: onRemoveFromApp)
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+        }
+        .padding(24)
+        .frame(width: 420)
     }
 }

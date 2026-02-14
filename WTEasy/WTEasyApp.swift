@@ -60,7 +60,6 @@ struct WTEasyApp: App {
                 ContentView()
             }
         }
-        .handlesExternalEvents(matching: ["*"])
         .modelContainer(modelContainer)
         .defaultSize(width: 1280, height: 800)
         .windowStyle(.titleBar)
