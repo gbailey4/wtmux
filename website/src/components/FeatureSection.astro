@@ -1,0 +1,31 @@
+---
+interface Props {
+  title: string;
+  subtitle: string;
+  features: string[];
+  alternate?: boolean;
+  icon?: string;
+}
+
+const { title, subtitle, features, alternate = false, icon } = Astro.props;
+---
+
+<section class:list={["py-20 md:py-28", alternate ? "bg-surface-alt" : "bg-surface"]}>
+  <div class="max-w-5xl mx-auto px-6">
+    <div class="max-w-2xl">
+      {icon && <p class="font-mono text-primary text-sm mb-3 tracking-wide">{icon}</p>}
+      <h2 class="text-2xl md:text-3xl font-bold text-text">{title}</h2>
+      <p class="mt-4 text-text-muted text-lg">{subtitle}</p>
+      <ul class="mt-8 space-y-4">
+        {features.map((feature) => (
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-primary mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span class="text-text-muted">{feature}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,58 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import Hero from "../components/Hero.astro";
+import FeatureSection from "../components/FeatureSection.astro";
+---
+
+<BaseLayout title="WTMux — Agent-First Worktree Manager for macOS">
+  <Hero />
+
+  <FeatureSection
+    title="Built for Agents"
+    subtitle="Set up your entire project through a Claude Code conversation. No forms, no config files to hand-edit."
+    icon="// agent-first"
+    features={[
+      "Configure projects entirely through Claude Code — runners, env files, setup commands",
+      "MCP integration auto-detects your stack and suggests the right configuration",
+      "Every new worktree is ready to go — dependencies installed, env files copied, runners started",
+      "Expanding support for Codex, OpenCode, and other coding agents",
+    ]}
+    alternate={true}
+  />
+
+  <FeatureSection
+    title="Work in Parallel"
+    subtitle="Run multiple worktrees side by side. Context-switch by clicking, not stashing."
+    icon="// parallel workflows"
+    features={[
+      "Split panes — multiple worktrees visible simultaneously with drag-and-drop",
+      "Each worktree gets its own terminal and runner stack",
+      "Create a new worktree from any branch in seconds",
+      "No more git stash / git stash pop — every branch has its own working directory",
+    ]}
+  />
+
+  <FeatureSection
+    title="Minimal by Design"
+    subtitle="The terminal is the interface. Agents do the heavy lifting. WTMux stays out of the way."
+    icon="// less is more"
+    features={[
+      "Runners auto-start when you open a worktree — dev servers, watchers, all of it",
+      "Ports auto-detected so you always know what's running where",
+      "Environment files automatically copied to new worktrees",
+      "No bloated GUI — just terminals, runners, and the info you need",
+    ]}
+    alternate={true}
+  />
+
+  <FeatureSection
+    title="See Your Changes"
+    subtitle="Built-in diff viewer so you never have to leave the app to review what changed."
+    icon="// git-aware"
+    features={[
+      "Side-by-side diff viewer with syntax highlighting",
+      "Git status tracking per worktree — see changed files at a glance",
+      "Unified diff parsing with full context",
+    ]}
+  />
+</BaseLayout>

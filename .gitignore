@@ -18,6 +18,11 @@ Package.resolved
 # SourceKit-LSP (machine-specific DerivedData paths)
 buildServer.json
 
+# Website
+website/node_modules/
+website/dist/
+website/.astro/
+
 # Claude Code local settings
 .claude/settings.local.json
 .wtmux
