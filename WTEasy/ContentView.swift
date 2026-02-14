@@ -133,7 +133,10 @@ struct ContentView: View {
                 .overlay(alignment: .bottom) { Divider() }
             }
         }
-        .task { await checkGitAvailability() }
+        .task {
+            await checkGitAvailability()
+            backfillProjectColors()
+        }
         .sheet(isPresented: $showingAddProject) {
             AddProjectView(
                 selectedWorktreeID: $selectedWorktreeID,
@@ -199,6 +202,15 @@ struct ContentView: View {
         } catch {
             gitAvailable = false
         }
+    }
+
+    private func backfillProjectColors() {
+        let needsColor = projects.filter { $0.colorName == nil }
+        guard !needsColor.isEmpty else { return }
+        for project in needsColor {
+            project.colorName = Project.nextColorName(in: modelContext)
+        }
+        try? modelContext.save()
     }
 
     private func findWorktree(id: String) -> Worktree? {

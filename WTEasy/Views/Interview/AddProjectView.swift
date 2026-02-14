@@ -643,7 +643,8 @@ struct AddProjectView: View {
                     name: projectName,
                     repoPath: repoPath,
                     defaultBranch: defaultBranch,
-                    worktreeBasePath: worktreeBasePath
+                    worktreeBasePath: worktreeBasePath,
+                    colorName: Project.nextColorName(in: modelContext)
                 )
                 modelContext.insert(project)
             }
@@ -676,7 +677,7 @@ struct AddProjectView: View {
             }
 
             // 4. Pre-create terminal session with claude command
-            let claudeCommand = #"claude "Analyze this repo and use the wteasy MCP configure_project tool to configure it. Determine appropriate setup commands, run configurations (dev servers with ports), env files to copy between worktrees, and terminal start command.""#
+            let claudeCommand = "claude \"Analyze the repo at \(repoPath) and use the wteasy MCP configure_project tool to configure it. Use \(repoPath) as the repoPath. Determine appropriate setup commands, run configurations (dev servers with ports), env files to copy between worktrees, and terminal start command. Before calling configure_project, present the proposed configuration to the user for review. If they give feedback, incorporate it and present the updated configuration again for approval. Only call configure_project once the user confirms.\""
             _ = terminalSessionManager.createTab(
                 forWorktree: worktreePath,
                 workingDirectory: worktreePath,
@@ -701,7 +702,8 @@ struct AddProjectView: View {
                 name: projectName,
                 repoPath: repoPath,
                 defaultBranch: defaultBranch,
-                worktreeBasePath: worktreeBasePath
+                worktreeBasePath: worktreeBasePath,
+                colorName: Project.nextColorName(in: modelContext)
             )
             modelContext.insert(project)
         }

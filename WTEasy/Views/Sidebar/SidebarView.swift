@@ -454,6 +454,22 @@ struct SidebarView: View {
     }
 }
 
+extension Color {
+    static func fromPaletteName(_ name: String?) -> Color? {
+        switch name {
+        case "blue": .blue
+        case "green": .green
+        case "orange": .orange
+        case "purple": .purple
+        case "teal": .teal
+        case "pink": .pink
+        case "indigo": .indigo
+        case "cyan": .cyan
+        default: nil
+        }
+    }
+}
+
 private let projectColorPalette: [Color] = [
     .blue,
     .green,
@@ -466,6 +482,9 @@ private let projectColorPalette: [Color] = [
 ]
 
 private func projectColor(for project: Project) -> Color {
+    if let color = Color.fromPaletteName(project.colorName) {
+        return color
+    }
     let index = abs(project.name.hashValue) % projectColorPalette.count
     return projectColorPalette[index]
 }
@@ -478,7 +497,7 @@ struct ProjectRow: View {
             RoundedRectangle(cornerRadius: 2)
                 .fill(projectColor(for: project))
                 .frame(width: 4, height: 14)
-            Image(systemName: project.isRemote ? "globe" : "folder.fill")
+            Image(systemName: project.resolvedIconName)
                 .foregroundStyle(projectColor(for: project))
                 .font(.title3)
             Text(project.name)

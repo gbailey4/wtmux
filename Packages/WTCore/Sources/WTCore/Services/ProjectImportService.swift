@@ -117,7 +117,8 @@ public struct ProjectImportService {
                 name: name,
                 repoPath: repoPath,
                 defaultBranch: branch,
-                worktreeBasePath: wtBase
+                worktreeBasePath: wtBase,
+                colorName: Project.nextColorName(in: modelContext)
             )
 
             let profile = ProjectProfile()

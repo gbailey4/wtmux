@@ -15,6 +15,10 @@ public final class Project {
     public var remoteRepoPath: String?
     public var remoteWorktreeBasePath: String?
 
+    // Appearance
+    public var colorName: String?
+    public var iconName: String?
+
     @Relationship(deleteRule: .cascade, inverse: \Worktree.project)
     public var worktrees: [Worktree] = []
 
@@ -25,18 +29,54 @@ public final class Project {
         sshHost != nil
     }
 
+    public var resolvedIconName: String {
+        iconName ?? (isRemote ? "globe" : "folder.fill")
+    }
+
     public var createdAt: Date
+
+    public static let colorPalette: [String] = [
+        "blue", "green", "orange", "purple", "teal", "pink", "indigo", "cyan"
+    ]
+
+    public static let iconPalette: [String] = [
+        "folder.fill",
+        "chevron.left.forwardslash.chevron.right",
+        "hammer.fill",
+        "wrench.and.screwdriver.fill",
+        "cube.fill",
+        "shippingbox.fill",
+        "terminal.fill",
+        "globe",
+        "building.2.fill",
+        "leaf.fill",
+        "gamecontroller.fill",
+        "book.fill",
+        "paintbrush.fill",
+        "gearshape.fill",
+        "server.rack",
+        "cpu.fill",
+    ]
+
+    public static func nextColorName(in modelContext: ModelContext) -> String {
+        let count = (try? modelContext.fetchCount(FetchDescriptor<Project>())) ?? 0
+        return colorPalette[count % colorPalette.count]
+    }
 
     public init(
         name: String,
         repoPath: String,
         defaultBranch: String = "main",
-        worktreeBasePath: String = ""
+        worktreeBasePath: String = "",
+        colorName: String? = nil,
+        iconName: String? = nil
     ) {
         self.name = name
         self.repoPath = repoPath
         self.defaultBranch = defaultBranch
         self.worktreeBasePath = worktreeBasePath
+        self.colorName = colorName
+        self.iconName = iconName
         self.createdAt = Date()
     }
 }

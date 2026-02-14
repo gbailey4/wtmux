@@ -20,6 +20,10 @@ struct ProjectSettingsView: View {
     @State private var sshUser: String
     @State private var sshPort: String
 
+    // Appearance
+    @State private var selectedColor: String
+    @State private var selectedIcon: String
+
     // Profile fields
     @State private var runConfigurations: [EditableRunConfig]
     @State private var setupCommands: [String]
@@ -41,6 +45,10 @@ struct ProjectSettingsView: View {
         _sshHost = State(initialValue: project.sshHost ?? "")
         _sshUser = State(initialValue: project.sshUser ?? "")
         _sshPort = State(initialValue: project.sshPort.map(String.init) ?? "22")
+
+        // Appearance
+        _selectedColor = State(initialValue: project.colorName ?? Project.colorPalette[0])
+        _selectedIcon = State(initialValue: project.resolvedIconName)
 
         // Initialize profile fields
         let profile = project.profile
@@ -67,6 +75,50 @@ struct ProjectSettingsView: View {
                         reanalyzeButton
                         Spacer()
                         reloadFromFileButton
+                    }
+                }
+
+                Section("Appearance") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Color")
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            ForEach(Project.colorPalette, id: \.self) { name in
+                                let color = Color.fromPaletteName(name) ?? .gray
+                                Circle()
+                                    .fill(color)
+                                    .frame(width: 24, height: 24)
+                                    .overlay {
+                                        if name == selectedColor {
+                                            Image(systemName: "checkmark")
+                                                .font(.caption.bold())
+                                                .foregroundStyle(.white)
+                                        }
+                                    }
+                                    .onTapGesture { selectedColor = name }
+                            }
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Icon")
+                            .foregroundStyle(.secondary)
+                        LazyVGrid(columns: Array(repeating: GridItem(.fixed(36)), count: 8), spacing: 8) {
+                            ForEach(Project.iconPalette, id: \.self) { icon in
+                                Image(systemName: icon)
+                                    .font(.system(size: 16))
+                                    .frame(width: 32, height: 32)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(icon == selectedIcon ? Color.accentColor.opacity(0.2) : Color.clear)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .stroke(icon == selectedIcon ? Color.accentColor : Color.clear, lineWidth: 1.5)
+                                    )
+                                    .onTapGesture { selectedIcon = icon }
+                            }
+                        }
                     }
                 }
 
@@ -411,6 +463,8 @@ struct ProjectSettingsView: View {
         project.repoPath = repoPath
         project.defaultBranch = defaultBranch
         project.worktreeBasePath = worktreeBasePath
+        project.colorName = selectedColor
+        project.iconName = selectedIcon
 
         if isRemote {
             project.sshHost = sshHost.isEmpty ? nil : sshHost
