@@ -18,7 +18,7 @@ struct ToolHandlers: Sendable {
     // MARK: - Tool Definitions
 
     private var toolDefinitions: [Tool] {
-        [configureProjectTool, getProjectConfigTool]
+        [analyzeProjectTool, configureProjectTool, getProjectConfigTool]
     }
 
     private var configureProjectTool: Tool {
@@ -152,10 +152,33 @@ struct ToolHandlers: Sendable {
         )
     }
 
+    private var analyzeProjectTool: Tool {
+        Tool(
+            name: "analyze_project",
+            description: """
+                Scan a git repository to detect its project structure: env files, \
+                package manager, scripts (with categories), and default branch. \
+                Returns a structured analysis to present to the user before configuring.
+                """,
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "repoPath": .object([
+                        "type": .string("string"),
+                        "description": .string("Absolute path to the git repository root"),
+                    ])
+                ]),
+                "required": .array([.string("repoPath")]),
+            ])
+        )
+    }
+
     // MARK: - Call Dispatch
 
     private func handleCall(_ params: CallTool.Parameters) async -> CallTool.Result {
         switch params.name {
+        case "analyze_project":
+            return handleAnalyzeProject(params.arguments)
         case "configure_project":
             return await handleConfigureProject(params.arguments)
         case "get_project_config":
@@ -166,6 +189,38 @@ struct ToolHandlers: Sendable {
                 isError: true
             )
         }
+    }
+
+    // MARK: - analyze_project
+
+    private func handleAnalyzeProject(_ arguments: [String: Value]?) -> CallTool.Result {
+        guard let repoPath = arguments?["repoPath"]?.stringValue else {
+            return .init(content: [.text("Missing required parameter: repoPath")], isError: true)
+        }
+
+        guard repoPath.hasPrefix("/") else {
+            return .init(content: [.text("repoPath must be an absolute path")], isError: true)
+        }
+
+        let gitDir = URL(fileURLWithPath: repoPath).appendingPathComponent(".git")
+        guard FileManager.default.fileExists(atPath: gitDir.path) else {
+            return .init(
+                content: [.text("No .git directory found at \(repoPath). Is this a git repository?")],
+                isError: true
+            )
+        }
+
+        let analysis = ProjectAnalyzer.analyze(repoPath: repoPath)
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+        guard let data = try? encoder.encode(analysis),
+              let json = String(data: data, encoding: .utf8) else {
+            return .init(content: [.text("Failed to serialize analysis result")], isError: true)
+        }
+
+        return .init(content: [.text(json)])
     }
 
     // MARK: - configure_project
