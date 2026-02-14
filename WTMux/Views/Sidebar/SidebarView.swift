@@ -24,9 +24,8 @@ struct SidebarView: View {
     @State private var deleteWorktreeBranch = true
     @State private var deleteError: String?
     @State private var showDeleteError = false
-    @State private var isDeletingWorktree = false
+    @State private var deletingWorktreePaths: Set<String> = []
     @State private var projectToDelete: Project?
-    @State private var isDeletingProject = false
     @State private var deleteProjectBranches = true
     @State private var projectDeleteError: String?
     @State private var showProjectDeleteError = false
@@ -48,6 +47,7 @@ struct SidebarView: View {
                     ForEach(project.worktrees.sorted(by: { $0.createdAt < $1.createdAt })) { worktree in
                         WorktreeRow(
                             worktree: worktree,
+                            isDeleting: deletingWorktreePaths.contains(worktree.path),
                             isRunning: runningWorktreeIds.contains(worktree.path),
                             claudeStatus: claudeStatusManager.status(forWorktreePath: worktree.path),
                             hasRunConfigurations: hasRunConfigurations(for: worktree),
@@ -59,8 +59,11 @@ struct SidebarView: View {
                             onStopRunners: { stopRunners(for: worktree) }
                         )
                             .tag(worktree.path)
+                            .selectionDisabled(deletingWorktreePaths.contains(worktree.path))
                             .contextMenu {
-                                worktreeContextMenu(worktree: worktree)
+                                if !deletingWorktreePaths.contains(worktree.path) {
+                                    worktreeContextMenu(worktree: worktree)
+                                }
                             }
                     }
                 } header: {
@@ -113,14 +116,14 @@ struct SidebarView: View {
             DeleteWorktreeSheet(
                 worktreeName: wt.branchName,
                 deleteBranch: $deleteWorktreeBranch,
-                isDeleting: $isDeletingWorktree,
                 onDelete: {
                     let shouldDeleteBranch = deleteWorktreeBranch
-                    isDeletingWorktree = true
+                    let path = wt.path
+                    deletingWorktreePaths.insert(path)
+                    worktreeToDelete = nil
                     Task {
                         await deleteWorktreeWithGit(wt, deleteBranch: shouldDeleteBranch)
-                        isDeletingWorktree = false
-                        worktreeToDelete = nil
+                        deletingWorktreePaths.remove(path)
                     }
                 },
                 onCancel: {
@@ -138,21 +141,19 @@ struct SidebarView: View {
                 projectName: project.name,
                 worktreeCount: project.worktrees.count,
                 deleteBranches: $deleteProjectBranches,
-                isDeleting: $isDeletingProject,
                 onDeleteEverything: {
                     let shouldDeleteBranches = deleteProjectBranches
-                    isDeletingProject = true
+                    let paths = Set(project.worktrees.map(\.path))
+                    deletingWorktreePaths.formUnion(paths)
+                    projectToDelete = nil
                     Task {
                         await deleteProjectWithWorktrees(project, deleteBranches: shouldDeleteBranches)
-                        isDeletingProject = false
-                        projectToDelete = nil
+                        deletingWorktreePaths.subtract(paths)
                     }
                 },
                 onRemoveFromApp: {
-                    isDeletingProject = true
-                    deleteProjectOnly(project)
-                    isDeletingProject = false
                     projectToDelete = nil
+                    deleteProjectOnly(project)
                 },
                 onCancel: {
                     projectToDelete = nil
@@ -244,7 +245,7 @@ struct SidebarView: View {
         } label: {
             Label("Delete Worktree...", systemImage: "trash")
         }
-        .disabled(isDeletingWorktree && worktreeToDelete?.path == worktree.path)
+        .disabled(deletingWorktreePaths.contains(worktree.path))
     }
 
     // MARK: - Runner Helpers
@@ -521,6 +522,7 @@ struct ProjectRow: View {
 
 struct WorktreeRow: View {
     let worktree: Worktree
+    var isDeleting: Bool = false
     var isRunning: Bool = false
     var claudeStatus: ClaudeCodeStatus? = nil
     var hasRunConfigurations: Bool = false
@@ -531,15 +533,21 @@ struct WorktreeRow: View {
 
     var body: some View {
         HStack {
-            Image(systemName: statusIcon)
-                .foregroundStyle(statusColor)
-                .font(.subheadline)
+            if isDeleting {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 14)
+            } else {
+                Image(systemName: statusIcon)
+                    .foregroundStyle(statusColor)
+                    .font(.subheadline)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     Text(worktree.branchName)
                         .font(.subheadline)
                         .lineLimit(1)
-                    if let claudeStatus {
+                    if !isDeleting, let claudeStatus {
                         claudeBadge(claudeStatus)
                     }
                 }
@@ -548,7 +556,7 @@ struct WorktreeRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if isHovered, hasRunConfigurations {
+            if !isDeleting, isHovered, hasRunConfigurations {
                 if isRunning, let onStopRunners {
                     Button {
                         onStopRunners()
@@ -571,13 +579,14 @@ struct WorktreeRow: View {
                     .help("Start Runners")
                 }
             }
-            if isRunning {
+            if !isDeleting, isRunning {
                 Image(systemName: "play.circle.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(.green)
                     .help("Runners active")
             }
         }
+        .opacity(isDeleting ? 0.5 : 1.0)
         .onHover { hovering in
             isHovered = hovering
         }
@@ -637,34 +646,25 @@ struct WorktreeRow: View {
 struct DeleteWorktreeSheet: View {
     let worktreeName: String
     @Binding var deleteBranch: Bool
-    @Binding var isDeleting: Bool
     let onDelete: () -> Void
     let onCancel: () -> Void
 
     var body: some View {
         VStack(spacing: 16) {
-            if isDeleting {
-                ProgressView()
-                    .controlSize(.large)
+            Image(systemName: "trash")
+                .font(.largeTitle)
+                .foregroundStyle(.red)
 
-                Text("Deleting Worktree...")
-                    .font(.headline)
-            } else {
-                Image(systemName: "trash")
-                    .font(.largeTitle)
-                    .foregroundStyle(.red)
+            Text("Delete Worktree?")
+                .font(.headline)
 
-                Text("Delete Worktree?")
-                    .font(.headline)
+            Text("This will remove the worktree \"\(worktreeName)\" and delete its directory from disk. Any uncommitted changes will be lost.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-                Text("This will remove the worktree \"\(worktreeName)\" and delete its directory from disk. Any uncommitted changes will be lost.")
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Toggle("Also delete branch \"\(worktreeName)\"", isOn: $deleteBranch)
-                    .padding(.horizontal)
-            }
+            Toggle("Also delete branch \"\(worktreeName)\"", isOn: $deleteBranch)
+                .padding(.horizontal)
 
             HStack {
                 Button("Cancel", action: onCancel)
@@ -673,7 +673,6 @@ struct DeleteWorktreeSheet: View {
                 Button("Delete", role: .destructive, action: onDelete)
                     .keyboardShortcut(.defaultAction)
             }
-            .disabled(isDeleting)
         }
         .padding(24)
         .frame(width: 380)
@@ -686,40 +685,31 @@ struct DeleteProjectSheet: View {
     let projectName: String
     let worktreeCount: Int
     @Binding var deleteBranches: Bool
-    @Binding var isDeleting: Bool
     let onDeleteEverything: () -> Void
     let onRemoveFromApp: () -> Void
     let onCancel: () -> Void
 
     var body: some View {
         VStack(spacing: 16) {
-            if isDeleting {
-                ProgressView()
-                    .controlSize(.large)
+            Image(systemName: "trash")
+                .font(.largeTitle)
+                .foregroundStyle(.red)
 
-                Text("Deleting Project...")
-                    .font(.headline)
+            Text("Delete Project \"\(projectName)\"?")
+                .font(.headline)
+
+            if worktreeCount > 0 {
+                Text("This project has \(worktreeCount) worktree\(worktreeCount == 1 ? "" : "s"). You can remove all worktrees from disk or just remove the project from WTMux.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Toggle("Also delete worktree branches", isOn: $deleteBranches)
+                    .padding(.horizontal)
             } else {
-                Image(systemName: "trash")
-                    .font(.largeTitle)
-                    .foregroundStyle(.red)
-
-                Text("Delete Project \"\(projectName)\"?")
-                    .font(.headline)
-
-                if worktreeCount > 0 {
-                    Text("This project has \(worktreeCount) worktree\(worktreeCount == 1 ? "" : "s"). You can remove all worktrees from disk or just remove the project from WTMux.")
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Toggle("Also delete worktree branches", isOn: $deleteBranches)
-                        .padding(.horizontal)
-                } else {
-                    Text("This will remove the project from WTMux.")
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(.secondary)
-                }
+                Text("This will remove the project from WTMux.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
             }
 
             HStack {
@@ -735,7 +725,6 @@ struct DeleteProjectSheet: View {
                         .keyboardShortcut(.defaultAction)
                 }
             }
-            .disabled(isDeleting)
         }
         .padding(24)
         .frame(width: 420)

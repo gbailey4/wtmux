@@ -7,6 +7,7 @@ import Foundation
 public final class TerminalSessionManager: @unchecked Sendable {
     public private(set) var sessions: [String: TerminalSession] = [:]
     public private(set) var activeSessionId: [String: String] = [:]
+    public private(set) var tabOrder: [String: [String]] = [:]  // worktreeId → [sessionId]
     private var tabCounters: [String: Int] = [:]
     private var portScanTimer: Timer?
 
@@ -45,6 +46,42 @@ public final class TerminalSessionManager: @unchecked Sendable {
             .sorted { $0.id < $1.id }
     }
 
+    /// Returns terminal (non-runner) sessions in user-defined display order.
+    public func orderedSessions(forWorktree worktreeId: String) -> [TerminalSession] {
+        let tabs = sessions.values
+            .filter { $0.worktreeId == worktreeId && !SessionID.isRunner($0.id) }
+        if let order = tabOrder[worktreeId] {
+            let byId = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
+            var ordered = order.compactMap { byId[$0] }
+            // Append any tabs not yet in the order array (e.g. newly created)
+            let orderedIds = Set(order)
+            let extras = tabs.filter { !orderedIds.contains($0.id) }.sorted { $0.id < $1.id }
+            ordered.append(contentsOf: extras)
+            return ordered
+        }
+        return tabs.sorted { $0.id < $1.id }
+    }
+
+    /// Moves a terminal tab to a new index within the worktree's tab order.
+    public func moveTab(sessionId: String, toIndex index: Int, inWorktree worktreeId: String) {
+        var order = tabOrder[worktreeId] ?? orderedSessions(forWorktree: worktreeId).map(\.id)
+        guard let fromIndex = order.firstIndex(of: sessionId) else { return }
+        order.remove(at: fromIndex)
+        let clampedIndex = min(index, order.count)
+        order.insert(sessionId, at: clampedIndex)
+        tabOrder[worktreeId] = order
+    }
+
+    /// Renames a terminal session. Rejects empty strings and duplicate names within the same worktree.
+    @discardableResult
+    public func renameTab(sessionId: String, to newTitle: String) -> Bool {
+        guard !newTitle.isEmpty, let session = sessions[sessionId] else { return false }
+        let siblings = orderedSessions(forWorktree: session.worktreeId)
+        if siblings.contains(where: { $0.id != sessionId && $0.title == newTitle }) { return false }
+        session.title = newTitle
+        return true
+    }
+
     public func createTab(forWorktree worktreeId: String, workingDirectory: String, initialCommand: String? = nil) -> TerminalSession {
         let count = (tabCounters[worktreeId] ?? 0) + 1
         tabCounters[worktreeId] = count
@@ -58,6 +95,9 @@ public final class TerminalSessionManager: @unchecked Sendable {
             initialCommand: initialCommand
         )
         activeSessionId[worktreeId] = id
+        if tabOrder[worktreeId] != nil {
+            tabOrder[worktreeId]!.append(id)
+        }
         return session
     }
 
@@ -73,9 +113,10 @@ public final class TerminalSessionManager: @unchecked Sendable {
         session.terminalView?.terminate()
         session.terminalView = nil
         sessions.removeValue(forKey: sessionId)
+        tabOrder[worktreeId]?.removeAll { $0 == sessionId }
 
         if wasActive {
-            let remaining = sessions(forWorktree: worktreeId)
+            let remaining = orderedSessions(forWorktree: worktreeId)
             activeSessionId[worktreeId] = remaining.last?.id
         }
     }
@@ -95,6 +136,7 @@ public final class TerminalSessionManager: @unchecked Sendable {
         sessions.removeAll()
         activeSessionId.removeAll()
         tabCounters.removeAll()
+        tabOrder.removeAll()
     }
 
     // MARK: - Runner Sessions

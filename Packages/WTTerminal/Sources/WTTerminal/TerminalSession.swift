@@ -47,7 +47,7 @@ public enum SessionID {
 @MainActor
 public final class TerminalSession: Identifiable {
     public let id: String
-    public let title: String
+    public var title: String
     public let worktreeId: String
     public let workingDirectory: String
     public let shellPath: String

@@ -24,6 +24,10 @@ struct WorktreeDetailView: View {
     @State private var showRerunSetupSheet = false
     @State private var suppressSetupConfirm = false
     @State private var lastActiveSetupSessionId: [String: String] = [:]
+    @State private var renamingTabId: String?
+    @State private var renameText: String = ""
+    @State private var renameError: Bool = false
+    @FocusState private var isRenameFieldFocused: Bool
 
     private var currentTheme: TerminalTheme {
         TerminalThemes.theme(forId: terminalThemeId)
@@ -32,8 +36,7 @@ struct WorktreeDetailView: View {
     private var worktreeId: String { worktree.path }
 
     private var terminalTabs: [TerminalSession] {
-        terminalSessionManager.sessions(forWorktree: worktreeId)
-            .filter { !SessionID.isRunner($0.id) }
+        terminalSessionManager.orderedSessions(forWorktree: worktreeId)
     }
 
     private var activeTabId: String? {
@@ -61,8 +64,18 @@ struct WorktreeDetailView: View {
     }
 
     /// Runner tabs that correspond to run configurations (excludes setup sessions).
+    /// Sorted: auto-start runners first, then optional, each sub-group by order.
     private var configRunnerTabs: [TerminalSession] {
-        runnerTabs.filter { !SessionID.isSetup($0.id) }
+        runnerTabs
+            .filter { !SessionID.isSetup($0.id) }
+            .sorted { a, b in
+                let configA = runConfiguration(for: a)
+                let configB = runConfiguration(for: b)
+                let autoA = configA?.autoStart ?? false
+                let autoB = configB?.autoStart ?? false
+                if autoA != autoB { return autoA }  // auto-start first
+                return (configA?.order ?? .max) < (configB?.order ?? .max)
+            }
     }
 
     /// Whether the active runner tab is a setup session.
@@ -541,13 +554,39 @@ struct WorktreeDetailView: View {
     @ViewBuilder
     private func terminalTab(session: TerminalSession) -> some View {
         HStack(spacing: 4) {
-            Button {
-                terminalSessionManager.setActiveSession(worktreeId: worktreeId, sessionId: session.id)
-            } label: {
+            if renamingTabId == session.id {
+                VStack(alignment: .leading, spacing: 2) {
+                    TextField("Tab name", text: $renameText)
+                        .textFieldStyle(.plain)
+                        .font(.body)
+                        .lineLimit(1)
+                        .frame(minWidth: 60, maxWidth: 120)
+                        .focused($isRenameFieldFocused)
+                        .onSubmit { commitRename(sessionId: session.id) }
+                        .onChange(of: isRenameFieldFocused) { _, focused in
+                            if !focused { commitRename(sessionId: session.id) }
+                        }
+                        .onChange(of: renameText) { _, _ in renameError = false }
+                        .onKeyPress(.escape) {
+                            cancelRename()
+                            return .handled
+                        }
+                    if renameError {
+                        Text("Name already in use")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    }
+                }
+            } else {
                 Text(session.title)
                     .lineLimit(1)
+                    .onTapGesture(count: 2) {
+                        startRename(session: session)
+                    }
+                    .onTapGesture(count: 1) {
+                        terminalSessionManager.setActiveSession(worktreeId: worktreeId, sessionId: session.id)
+                    }
             }
-            .buttonStyle(.plain)
 
             Button {
                 if session.terminalView?.hasChildProcesses() == true {
@@ -565,6 +604,37 @@ struct WorktreeDetailView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(session.id == activeTabId ? Color.accentColor.opacity(0.2) : Color.clear)
+        .draggable(session.id)
+        .dropDestination(for: String.self) { droppedIds, _ in
+            guard let droppedId = droppedIds.first,
+                  droppedId != session.id,
+                  let targetIndex = terminalTabs.firstIndex(where: { $0.id == session.id }) else { return false }
+            terminalSessionManager.moveTab(sessionId: droppedId, toIndex: targetIndex, inWorktree: worktreeId)
+            return true
+        }
+    }
+
+    private func startRename(session: TerminalSession) {
+        renameText = session.title
+        renamingTabId = session.id
+        isRenameFieldFocused = true
+    }
+
+    private func commitRename(sessionId: String) {
+        guard renamingTabId == sessionId else { return }
+        let trimmed = renameText.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty {
+            if !terminalSessionManager.renameTab(sessionId: sessionId, to: trimmed) {
+                renameError = true
+                return
+            }
+        }
+        renameError = false
+        renamingTabId = nil
+    }
+
+    private func cancelRename() {
+        renamingTabId = nil
     }
 
     // MARK: - Runner Terminals
@@ -840,6 +910,40 @@ struct WorktreeDetailView: View {
         .padding(.vertical, 6)
         .opacity(isDefaultRunner(session) ? 1.0 : 0.6)
         .background(session.id == activeRunnerTabId ? Color.accentColor.opacity(0.2) : Color.clear)
+        .draggable(session.id)
+        .dropDestination(for: String.self) { droppedIds, _ in
+            guard let droppedId = droppedIds.first, droppedId != session.id else { return false }
+            reorderRunnerConfig(droppedSessionId: droppedId, targetSessionId: session.id)
+            return true
+        }
+    }
+
+    /// Reorders runner configurations via drag/drop within the same group (auto-start or optional).
+    private func reorderRunnerConfig(droppedSessionId: String, targetSessionId: String) {
+        guard let droppedSession = terminalSessionManager.session(for: droppedSessionId),
+              let targetSession = terminalSessionManager.session(for: targetSessionId),
+              let droppedConfig = runConfiguration(for: droppedSession),
+              let targetConfig = runConfiguration(for: targetSession) else { return }
+
+        // Only allow reorder within the same group
+        guard droppedConfig.autoStart == targetConfig.autoStart else { return }
+
+        let isAutoStart = droppedConfig.autoStart
+        var groupConfigs = runConfigurations
+            .filter { $0.autoStart == isAutoStart }
+            .sorted { $0.order < $1.order }
+
+        guard let fromIndex = groupConfigs.firstIndex(where: { $0.name == droppedConfig.name }),
+              let toIndex = groupConfigs.firstIndex(where: { $0.name == targetConfig.name }) else { return }
+
+        let moved = groupConfigs.remove(at: fromIndex)
+        groupConfigs.insert(moved, at: toIndex)
+
+        // Reassign order values; offset optional group so they sort after auto-start
+        let baseOffset = isAutoStart ? 0 : 1000
+        for (index, config) in groupConfigs.enumerated() {
+            config.order = baseOffset + index
+        }
     }
 
     // MARK: - Setup Group Tab
