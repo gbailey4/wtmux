@@ -42,7 +42,10 @@ struct ToolHandlers: Sendable {
                         "type": .string("array"),
                         "items": .object(["type": .string("string")]),
                         "description": .string(
-                            "Relative paths to env files to copy to new worktrees (e.g. .env, .env.local)"
+                            "Relative paths to env files to copy to new worktrees (e.g. .env, .env.local). "
+                            + "IMPORTANT: Only include files that actually exist on the local filesystem. "
+                            + "Do NOT check git remote, git ls-files, or .gitignore to guess env file names. "
+                            + "If you haven't confirmed a file exists locally, do not include it."
                         ),
                     ]),
                     "setupCommands": .object([
