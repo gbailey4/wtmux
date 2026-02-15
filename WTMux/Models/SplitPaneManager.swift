@@ -50,10 +50,12 @@ final class SplitPaneManager {
     private static let stateKey = "splitPaneState"
 
     init() {
-        if let (restoredWindows, focusedWinID, focusedPaneID) = Self.loadState() {
+        if let (restoredWindows, focusedWinID, _) = Self.loadState() {
             self.windows = restoredWindows
             self.focusedWindowID = focusedWinID ?? restoredWindows.first?.id
-            self.focusedPaneID = focusedPaneID ?? restoredWindows.first?.columns.first?.panes.first?.id
+            // Pane IDs are regenerated on restore, so always default to first pane
+            let focusedWin = restoredWindows.first { $0.id == self.focusedWindowID } ?? restoredWindows.first
+            self.focusedPaneID = focusedWin?.columns.first?.panes.first?.id
         } else {
             let initial = WindowState(name: "Window 1", columns: [WorktreeColumn()])
             self.windows = [initial]
@@ -315,8 +317,8 @@ final class SplitPaneManager {
                 terminalSessionManager?.terminateSessionsForPane(column.panes[0].id.uuidString)
                 window.columns.remove(at: colIndex)
                 if focusedPaneID == id {
-                    let newColIndex = max(0, colIndex - 1)
-                    focusedPaneID = window.columns[newColIndex].panes.first?.id
+                    let newColIndex = min(max(0, colIndex - 1), window.columns.count - 1)
+                    focusedPaneID = window.columns.isEmpty ? nil : window.columns[newColIndex].panes.first?.id
                 }
                 if let worktreeID, !visibleWorktreeIDs.contains(worktreeID) {
                     terminalSessionManager?.terminateAllSessionsForWorktree(worktreeID)
@@ -327,8 +329,8 @@ final class SplitPaneManager {
             terminalSessionManager?.terminateSessionsForPane(id.uuidString)
             column.panes.remove(at: paneIndex)
             if focusedPaneID == id {
-                let newIndex = max(0, paneIndex - 1)
-                focusedPaneID = column.panes[newIndex].id
+                let newIndex = min(max(0, paneIndex - 1), column.panes.count - 1)
+                focusedPaneID = column.panes.isEmpty ? nil : column.panes[newIndex].id
             }
         }
         saveState()
@@ -371,6 +373,11 @@ final class SplitPaneManager {
     /// Clears a worktree from all columns that display it (across all windows).
     func clearWorktree(_ worktreeID: String) {
         for window in windows {
+            for column in window.columns where column.worktreeID == worktreeID {
+                for pane in column.panes {
+                    terminalSessionManager?.terminateSessionsForPane(pane.id.uuidString)
+                }
+            }
             window.columns.removeAll { $0.worktreeID == worktreeID }
             if window.columns.isEmpty {
                 window.columns = [WorktreeColumn()]
@@ -400,6 +407,9 @@ final class SplitPaneManager {
         guard let index = windows.firstIndex(where: { $0.id == id }) else { return }
         let window = windows[index]
         for column in window.columns {
+            for pane in column.panes {
+                terminalSessionManager?.terminateSessionsForPane(pane.id.uuidString)
+            }
             if let worktreeID = column.worktreeID {
                 let othersHaveIt = windows.contains { w in
                     w.id != id && w.columns.contains { $0.worktreeID == worktreeID }
@@ -436,6 +446,7 @@ final class SplitPaneManager {
     private struct SavedState: Codable {
         let windows: [WindowSaved]
         let focusedWindowID: String?
+        // focusedPaneID kept for decoding compat but not used — pane IDs are regenerated on restore
         let focusedPaneID: String?
     }
 
@@ -469,7 +480,7 @@ final class SplitPaneManager {
                 )
             },
             focusedWindowID: focusedWindowID?.uuidString,
-            focusedPaneID: focusedPaneID?.uuidString
+            focusedPaneID: nil
         )
         if let data = try? JSONEncoder().encode(state) {
             UserDefaults.standard.set(data, forKey: Self.stateKey)
