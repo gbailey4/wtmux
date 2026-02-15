@@ -59,11 +59,8 @@ struct ContentView: View {
             get: { paneManager.focusedColumn?.worktreeID },
             set: { newValue in
                 guard let worktreeID = newValue else { return }
-                if paneManager.visibleWorktreeIDs.contains(worktreeID) {
-                    paneManager.focusPane(containing: worktreeID)
-                } else if let paneID = paneManager.focusedPaneID {
-                    paneManager.assignWorktree(worktreeID, to: paneID)
-                }
+                // Programmatic usage (AddProjectView) — always open in new window
+                paneManager.openWorktreeInNewWindow(worktreeID: worktreeID)
             }
         )
     }

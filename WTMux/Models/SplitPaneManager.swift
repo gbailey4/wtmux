@@ -111,6 +111,108 @@ final class SplitPaneManager {
         }
     }
 
+    /// Searches all windows for a worktree, returning its location if found.
+    func findWorktreeLocation(_ worktreeID: String) -> (windowID: UUID, columnID: UUID, paneID: UUID)? {
+        for window in windows {
+            for column in window.columns where column.worktreeID == worktreeID {
+                if let pane = column.panes.first {
+                    return (windowID: window.id, columnID: column.id, paneID: pane.id)
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Opens a worktree in a new window tab. If already open anywhere, focuses it instead.
+    func openWorktreeInNewWindow(worktreeID: String) {
+        if let loc = findWorktreeLocation(worktreeID) {
+            focusedWindowID = loc.windowID
+            focusedPaneID = loc.paneID
+            return
+        }
+        let count = windows.count + 1
+        let newColumn = WorktreeColumn(worktreeID: worktreeID)
+        let newWindow = WindowState(name: "Window \(count)", columns: [newColumn])
+        windows.append(newWindow)
+        focusedWindowID = newWindow.id
+        focusedPaneID = newColumn.panes.first?.id
+        saveState()
+    }
+
+    /// Opens a worktree as a split in the current window. If already open anywhere, focuses it instead.
+    func openWorktreeInCurrentWindowSplit(worktreeID: String) {
+        if let loc = findWorktreeLocation(worktreeID) {
+            focusedWindowID = loc.windowID
+            focusedPaneID = loc.paneID
+            return
+        }
+        addColumn(worktreeID: worktreeID, after: focusedColumn?.id)
+    }
+
+    /// Moves a column to a new window tab.
+    func moveColumnToNewWindow(columnID: UUID) {
+        guard let sourceWindow = windows.first(where: { $0.columns.contains { $0.id == columnID } }),
+              let colIndex = sourceWindow.columns.firstIndex(where: { $0.id == columnID }) else { return }
+
+        let column = sourceWindow.columns[colIndex]
+        sourceWindow.columns.remove(at: colIndex)
+
+        // If source window has no columns left, add an empty one
+        if sourceWindow.columns.isEmpty {
+            sourceWindow.columns = [WorktreeColumn()]
+        }
+
+        let count = windows.count + 1
+        let newWindow = WindowState(name: "Window \(count)", columns: [column])
+        windows.append(newWindow)
+        focusedWindowID = newWindow.id
+        focusedPaneID = column.panes.first?.id
+        cleanupEmptyWindows()
+        saveState()
+    }
+
+    /// Moves a column to an existing target window.
+    func moveColumnToWindow(columnID: UUID, targetWindowID: UUID) {
+        guard let sourceWindow = windows.first(where: { $0.columns.contains { $0.id == columnID } }),
+              let colIndex = sourceWindow.columns.firstIndex(where: { $0.id == columnID }),
+              let targetWindow = windows.first(where: { $0.id == targetWindowID }) else { return }
+
+        // Check 5-pane limit on target
+        let targetPaneCount = targetWindow.columns.flatMap(\.panes).count
+        let movingPaneCount = sourceWindow.columns[colIndex].panes.count
+        guard targetPaneCount + movingPaneCount <= 5 else { return }
+
+        let column = sourceWindow.columns[colIndex]
+        sourceWindow.columns.remove(at: colIndex)
+
+        // If source window has no columns left, add an empty one
+        if sourceWindow.columns.isEmpty {
+            sourceWindow.columns = [WorktreeColumn()]
+        }
+
+        targetWindow.columns.append(column)
+        focusedWindowID = targetWindowID
+        focusedPaneID = column.panes.first?.id
+        cleanupEmptyWindows()
+        saveState()
+    }
+
+    /// Removes windows that have only empty columns (no worktreeID), unless it's the focused or last window.
+    private func cleanupEmptyWindows() {
+        guard windows.count > 1 else { return }
+        windows.removeAll { window in
+            window.id != focusedWindowID
+                && window.columns.allSatisfy({ $0.worktreeID == nil })
+        }
+        // Ensure at least one window remains
+        if windows.isEmpty {
+            let initial = WindowState(name: "Window 1", columns: [WorktreeColumn()])
+            windows = [initial]
+            focusedWindowID = initial.id
+            focusedPaneID = initial.columns.first?.panes.first?.id
+        }
+    }
+
     func assignWorktree(_ worktreeID: String?, to paneID: UUID) {
         guard let col = column(forPane: paneID) else { return }
         col.worktreeID = worktreeID
@@ -164,8 +266,8 @@ final class SplitPaneManager {
         saveState()
     }
 
-    /// Opens a worktree in a split. If already visible, adds a pane to that column.
-    /// If not visible, creates a new column.
+    /// Opens a worktree in a split. If already visible in the current window, adds a pane.
+    /// If visible in another window, focuses it. Otherwise creates a new column.
     func openInSplit(worktreeID: String) {
         guard let window = focusedWindow else { return }
 
@@ -180,7 +282,14 @@ final class SplitPaneManager {
             return
         }
 
-        // Not visible — create new column
+        // If visible in another window, focus it there
+        if let loc = findWorktreeLocation(worktreeID) {
+            focusedWindowID = loc.windowID
+            focusedPaneID = loc.paneID
+            return
+        }
+
+        // Not visible anywhere — create new column
         addColumn(worktreeID: worktreeID, after: focusedColumn?.id)
     }
 

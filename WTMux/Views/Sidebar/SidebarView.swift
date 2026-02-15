@@ -22,10 +22,19 @@ struct SidebarView: View {
             get: { paneManager.focusedColumn?.worktreeID },
             set: { newValue in
                 guard let worktreeID = newValue else { return }
-                if paneManager.visibleWorktreeIDs.contains(worktreeID) {
-                    paneManager.focusPane(containing: worktreeID)
-                } else if let paneID = paneManager.focusedPaneID {
-                    paneManager.assignWorktree(worktreeID, to: paneID)
+
+                // If already open anywhere, focus it
+                if let loc = paneManager.findWorktreeLocation(worktreeID) {
+                    paneManager.focusedWindowID = loc.windowID
+                    paneManager.focusedPaneID = loc.paneID
+                    return
+                }
+
+                // Cmd+Click → split in current window; normal click → new window
+                if NSEvent.modifierFlags.contains(.command) {
+                    paneManager.openWorktreeInCurrentWindowSplit(worktreeID: worktreeID)
+                } else {
+                    paneManager.openWorktreeInNewWindow(worktreeID: worktreeID)
                 }
             }
         )
@@ -188,7 +197,7 @@ struct SidebarView: View {
             }
         }
         .sheet(item: $worktreeTargetProject) { project in
-            CreateWorktreeView(project: project)
+            CreateWorktreeView(project: project, paneManager: paneManager)
         }
         .sheet(item: $editingProject) { project in
             ProjectSettingsView(project: project, terminalSessionManager: terminalSessionManager)

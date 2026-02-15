@@ -234,6 +234,16 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
             }
             dragLogger.info("Drag: drop succeeded worktreeID=\(ref.worktreeID) zone=\(String(describing: targetZone))")
 
+            // Single-instance guard: sidebar drag of already-open worktree focuses instead of duplicating.
+            // Exception: dropping onto the column that already shows this worktree triggers a same-worktree split.
+            if ref.sourcePaneID == nil,
+               targetColumn.worktreeID != ref.worktreeID,
+               let loc = paneManager.findWorktreeLocation(ref.worktreeID) {
+                paneManager.focusedWindowID = loc.windowID
+                paneManager.focusedPaneID = loc.paneID
+                return true
+            }
+
             // If dragging same worktree onto a column that already shows it, add a pane
             if targetColumn.worktreeID == ref.worktreeID {
                 // Remove source pane if it's from a different column

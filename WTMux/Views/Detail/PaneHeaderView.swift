@@ -79,6 +79,23 @@ struct PaneHeaderView: View {
             Button("New Terminal in Split") {
                 paneManager.splitSameWorktree()
             }
+
+            Divider()
+
+            Button("Move to New Window") {
+                paneManager.moveColumnToNewWindow(columnID: column.id)
+            }
+            .disabled(paneManager.focusedWindow?.columns.count ?? 0 <= 1)
+
+            if paneManager.windows.count > 1 {
+                Menu("Move to Window\u{2026}") {
+                    ForEach(paneManager.windows.filter({ $0.id != paneManager.focusedWindowID })) { window in
+                        Button(window.name) {
+                            paneManager.moveColumnToWindow(columnID: column.id, targetWindowID: window.id)
+                        }
+                    }
+                }
+            }
         }
         .draggable(WorktreeReference(
             worktreeID: column.worktreeID ?? "",
