@@ -40,7 +40,7 @@ struct ContentView: View {
     @State private var showingAddProject = false
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var terminalSessionManager = TerminalSessionManager()
-    @State private var claudeStatusManager = ClaudeStatusManager()
+    @Environment(ClaudeStatusManager.self) private var claudeStatusManager
     @State private var importObserver = ProjectImportObserver()
     @State private var paneManager = SplitPaneManager()
     @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
