@@ -18,9 +18,14 @@ public enum SessionID {
     /// Prefix for runner (dev server / command) sessions.
     public static let runnerPrefix = "runner-"
 
-    /// Build an ID for an interactive tab.
+    /// Build an ID for an interactive tab (legacy, worktree-scoped).
     public static func tab(worktreeId: String, index: Int) -> String {
         "\(tabPrefix)\(worktreeId)-\(index)"
+    }
+
+    /// Build an ID for an interactive tab (pane-scoped).
+    public static func tab(paneId: String, index: Int) -> String {
+        "\(tabPrefix)\(paneId)-\(index)"
     }
 
     /// Build an ID for a runner session.
@@ -74,6 +79,9 @@ public final class TerminalSession: Identifiable {
     /// Called when the process exits (for non-interactive / command mode sessions).
     /// Parameters: session ID, exit code.
     public var onProcessExit: (@MainActor (String, Int32?) -> Void)?
+
+    /// The pane this session belongs to (nil for runner sessions, which are worktree-scoped).
+    public var paneId: String?
 
     public var terminalView: DeferredStartTerminalView?
 

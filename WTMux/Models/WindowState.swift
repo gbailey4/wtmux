@@ -4,11 +4,11 @@ import Foundation
 final class WindowState: Identifiable {
     let id: UUID
     var name: String
-    var panes: [PaneState]
+    var columns: [WorktreeColumn]
 
-    init(id: UUID = UUID(), name: String, panes: [PaneState]) {
+    init(id: UUID = UUID(), name: String, columns: [WorktreeColumn]) {
         self.id = id
         self.name = name
-        self.panes = panes.isEmpty ? [PaneState()] : panes
+        self.columns = columns.isEmpty ? [WorktreeColumn()] : columns
     }
 }

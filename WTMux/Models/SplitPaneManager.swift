@@ -16,19 +16,35 @@ final class SplitPaneManager {
         return windows.first { $0.id == id } ?? windows.first
     }
 
+    var columns: [WorktreeColumn] {
+        focusedWindow?.columns ?? []
+    }
+
+    /// Flat list of all panes in the focused window (across all columns).
     var panes: [PaneState] {
-        focusedWindow?.panes ?? []
+        focusedWindow?.columns.flatMap(\.panes) ?? []
+    }
+
+    /// The column containing the focused pane.
+    var focusedColumn: WorktreeColumn? {
+        guard let window = focusedWindow, let paneID = focusedPaneID else {
+            return focusedWindow?.columns.first
+        }
+        return window.columns.first { col in
+            col.panes.contains { $0.id == paneID }
+        } ?? window.columns.first
     }
 
     var focusedPane: PaneState? {
         guard let win = focusedWindow else { return nil }
-        guard let id = focusedPaneID else { return win.panes.first }
-        return win.panes.first { $0.id == id } ?? win.panes.first
+        let allPanes = win.columns.flatMap(\.panes)
+        guard let id = focusedPaneID else { return allPanes.first }
+        return allPanes.first { $0.id == id } ?? allPanes.first
     }
 
-    /// All worktree IDs currently visible in any pane across all windows.
+    /// All worktree IDs currently visible in any column across all windows.
     var visibleWorktreeIDs: Set<String> {
-        Set(windows.flatMap { $0.panes.compactMap(\.worktreeID) })
+        Set(windows.flatMap { $0.columns.compactMap(\.worktreeID) })
     }
 
     private static let stateKey = "splitPaneState"
@@ -37,77 +53,173 @@ final class SplitPaneManager {
         if let (restoredWindows, focusedWinID, focusedPaneID) = Self.loadState() {
             self.windows = restoredWindows
             self.focusedWindowID = focusedWinID ?? restoredWindows.first?.id
-            self.focusedPaneID = focusedPaneID ?? restoredWindows.first?.panes.first?.id
+            self.focusedPaneID = focusedPaneID ?? restoredWindows.first?.columns.first?.panes.first?.id
         } else {
-            let initial = WindowState(name: "Window 1", panes: [PaneState()])
+            let initial = WindowState(name: "Window 1", columns: [WorktreeColumn()])
             self.windows = [initial]
             self.focusedWindowID = initial.id
-            self.focusedPaneID = initial.panes.first?.id
+            self.focusedPaneID = initial.columns.first?.panes.first?.id
         }
     }
 
     func pane(for id: UUID) -> PaneState? {
         for window in windows {
-            if let pane = window.panes.first(where: { $0.id == id }) {
-                return pane
+            for column in window.columns {
+                if let pane = column.panes.first(where: { $0.id == id }) {
+                    return pane
+                }
             }
         }
         return nil
     }
 
+    func column(for id: UUID) -> WorktreeColumn? {
+        for window in windows {
+            if let col = window.columns.first(where: { $0.id == id }) {
+                return col
+            }
+        }
+        return nil
+    }
+
+    func column(forPane paneID: UUID) -> WorktreeColumn? {
+        for window in windows {
+            for column in window.columns {
+                if column.panes.contains(where: { $0.id == paneID }) {
+                    return column
+                }
+            }
+        }
+        return nil
+    }
+
+    func column(forWorktreeID worktreeID: String, in window: WindowState? = nil) -> WorktreeColumn? {
+        let searchWindow = window ?? focusedWindow
+        return searchWindow?.columns.first { $0.worktreeID == worktreeID }
+    }
+
     /// Focuses the first pane (across all windows) that displays the given worktree.
     func focusPane(containing worktreeID: String) {
         for window in windows {
-            if let pane = window.panes.first(where: { $0.worktreeID == worktreeID }) {
-                focusedWindowID = window.id
-                focusedPaneID = pane.id
-                return
+            for column in window.columns where column.worktreeID == worktreeID {
+                if let pane = column.panes.first {
+                    focusedWindowID = window.id
+                    focusedPaneID = pane.id
+                    return
+                }
             }
         }
     }
 
     func assignWorktree(_ worktreeID: String?, to paneID: UUID) {
-        guard let pane = pane(for: paneID) else { return }
-        pane.worktreeID = worktreeID
+        guard let col = column(forPane: paneID) else { return }
+        col.worktreeID = worktreeID
         saveState()
     }
 
-    func addPane(worktreeID: String? = nil, after paneID: UUID? = nil) {
+    func addColumn(worktreeID: String? = nil, after columnID: UUID? = nil) {
         guard let window = focusedWindow else { return }
-        guard window.panes.count < 5 else { return }
-        let newPane = PaneState(worktreeID: worktreeID)
-        if let afterID = paneID, let index = window.panes.firstIndex(where: { $0.id == afterID }) {
-            window.panes.insert(newPane, at: index + 1)
+        let totalPanes = window.columns.flatMap(\.panes).count
+        guard totalPanes < 5 else { return }
+        let newColumn = WorktreeColumn(worktreeID: worktreeID)
+        if let afterID = columnID,
+           let index = window.columns.firstIndex(where: { $0.id == afterID }) {
+            window.columns.insert(newColumn, at: index + 1)
         } else {
-            window.panes.append(newPane)
+            window.columns.append(newColumn)
         }
-        focusedPaneID = newPane.id
+        focusedPaneID = newColumn.panes.first?.id
         saveState()
     }
 
     func splitRight(worktreeID: String? = nil) {
-        addPane(worktreeID: worktreeID, after: focusedPaneID)
+        guard let window = focusedWindow else { return }
+
+        // If worktreeID matches focused column, add pane to same column (same-worktree split)
+        if let wid = worktreeID, let focused = focusedColumn, focused.worktreeID == wid {
+            splitSameWorktree()
+            return
+        }
+
+        // If worktreeID already has a column in this window, focus it
+        if let wid = worktreeID, let existingCol = column(forWorktreeID: wid, in: window) {
+            if let pane = existingCol.panes.first {
+                focusedPaneID = pane.id
+            }
+            return
+        }
+
+        // Otherwise create new column after focused column
+        addColumn(worktreeID: worktreeID, after: focusedColumn?.id)
+    }
+
+    /// Adds a new pane to the focused column (same-worktree split).
+    func splitSameWorktree() {
+        guard let column = focusedColumn, let window = focusedWindow else { return }
+        let totalPanes = window.columns.flatMap(\.panes).count
+        guard totalPanes < 5 else { return }
+        let newPane = PaneState()
+        column.panes.append(newPane)
+        focusedPaneID = newPane.id
+        saveState()
+    }
+
+    /// Opens a worktree in a split. If already visible, adds a pane to that column.
+    /// If not visible, creates a new column.
+    func openInSplit(worktreeID: String) {
+        guard let window = focusedWindow else { return }
+
+        // If worktree is already visible in this window, add pane to that column
+        if let existingCol = window.columns.first(where: { $0.worktreeID == worktreeID }) {
+            let totalPanes = window.columns.flatMap(\.panes).count
+            guard totalPanes < 5 else { return }
+            let newPane = PaneState()
+            existingCol.panes.append(newPane)
+            focusedPaneID = newPane.id
+            saveState()
+            return
+        }
+
+        // Not visible — create new column
+        addColumn(worktreeID: worktreeID, after: focusedColumn?.id)
     }
 
     func removePane(id: UUID) {
-        guard let window = focusedWindow else { return }
-        guard let index = window.panes.firstIndex(where: { $0.id == id }) else { return }
-        let removedWorktreeID = window.panes[index].worktreeID
+        guard let window = focusedWindow,
+              let colIndex = window.columns.firstIndex(where: { $0.panes.contains { $0.id == id } }),
+              let paneIndex = window.columns[colIndex].panes.firstIndex(where: { $0.id == id }) else { return }
 
-        if window.panes.count == 1 {
-            // Closing the final pane: clear it instead of removing (keep at least one pane).
-            window.panes[index].worktreeID = nil
-            if let worktreeID = removedWorktreeID {
-                terminalSessionManager?.terminateAllSessionsForWorktree(worktreeID)
+        let column = window.columns[colIndex]
+
+        if column.panes.count == 1 {
+            // Last pane in column — remove the entire column
+            let worktreeID = column.worktreeID
+
+            if window.columns.count == 1 {
+                // Last column in window — clear worktree instead of removing
+                terminalSessionManager?.terminateSessionsForPane(column.panes[0].id.uuidString)
+                column.worktreeID = nil
+                if let worktreeID {
+                    terminalSessionManager?.terminateAllSessionsForWorktree(worktreeID)
+                }
+            } else {
+                terminalSessionManager?.terminateSessionsForPane(column.panes[0].id.uuidString)
+                window.columns.remove(at: colIndex)
+                if focusedPaneID == id {
+                    let newColIndex = max(0, colIndex - 1)
+                    focusedPaneID = window.columns[newColIndex].panes.first?.id
+                }
+                if let worktreeID, !visibleWorktreeIDs.contains(worktreeID) {
+                    terminalSessionManager?.terminateAllSessionsForWorktree(worktreeID)
+                }
             }
         } else {
-            window.panes.remove(at: index)
+            // Multiple panes in column — just remove this pane
+            terminalSessionManager?.terminateSessionsForPane(id.uuidString)
+            column.panes.remove(at: paneIndex)
             if focusedPaneID == id {
-                let newIndex = max(0, index - 1)
-                focusedPaneID = window.panes[newIndex].id
-            }
-            if let worktreeID = removedWorktreeID, !visibleWorktreeIDs.contains(worktreeID) {
-                terminalSessionManager?.terminateAllSessionsForWorktree(worktreeID)
+                let newIndex = max(0, paneIndex - 1)
+                focusedPaneID = column.panes[newIndex].id
             }
         }
         saveState()
@@ -120,52 +232,47 @@ final class SplitPaneManager {
 
     func focusNextPane() {
         guard let window = focusedWindow else { return }
+        let allPanes = window.columns.flatMap(\.panes)
         guard let currentID = focusedPaneID,
-              let index = window.panes.firstIndex(where: { $0.id == currentID }) else { return }
-        let nextIndex = (index + 1) % window.panes.count
-        focusedPaneID = window.panes[nextIndex].id
+              let index = allPanes.firstIndex(where: { $0.id == currentID }) else { return }
+        let nextIndex = (index + 1) % allPanes.count
+        focusedPaneID = allPanes[nextIndex].id
     }
 
     func focusPreviousPane() {
         guard let window = focusedWindow else { return }
+        let allPanes = window.columns.flatMap(\.panes)
         guard let currentID = focusedPaneID,
-              let index = window.panes.firstIndex(where: { $0.id == currentID }) else { return }
-        let prevIndex = (index - 1 + window.panes.count) % window.panes.count
-        focusedPaneID = window.panes[prevIndex].id
+              let index = allPanes.firstIndex(where: { $0.id == currentID }) else { return }
+        let prevIndex = (index - 1 + allPanes.count) % allPanes.count
+        focusedPaneID = allPanes[prevIndex].id
     }
 
-    func movePane(fromIndex: Int, toIndex: Int) {
+    func insertColumn(worktreeID: String?, at index: Int) {
         guard let window = focusedWindow else { return }
-        guard fromIndex != toIndex,
-              window.panes.indices.contains(fromIndex),
-              window.panes.indices.contains(toIndex) else { return }
-        let pane = window.panes.remove(at: fromIndex)
-        window.panes.insert(pane, at: toIndex)
+        let totalPanes = window.columns.flatMap(\.panes).count
+        guard totalPanes < 5 else { return }
+        let newColumn = WorktreeColumn(worktreeID: worktreeID)
+        let clampedIndex = max(0, min(index, window.columns.count))
+        window.columns.insert(newColumn, at: clampedIndex)
+        focusedPaneID = newColumn.panes.first?.id
         saveState()
     }
 
-    func insertPane(worktreeID: String?, at index: Int) {
-        guard let window = focusedWindow else { return }
-        guard window.panes.count < 5 else { return }
-        let newPane = PaneState(worktreeID: worktreeID)
-        let clampedIndex = max(0, min(index, window.panes.count))
-        window.panes.insert(newPane, at: clampedIndex)
-        focusedPaneID = newPane.id
-        saveState()
-    }
-
-    /// Clears a worktree from all panes that display it (across all windows).
+    /// Clears a worktree from all columns that display it (across all windows).
     func clearWorktree(_ worktreeID: String) {
         for window in windows {
-            for pane in window.panes where pane.worktreeID == worktreeID {
-                pane.worktreeID = nil
-            }
-            let nonEmpty = window.panes.filter { $0.worktreeID != nil }
-            if !nonEmpty.isEmpty && window.panes.count > 1 {
-                window.panes.removeAll { $0.worktreeID == nil }
+            window.columns.removeAll { $0.worktreeID == worktreeID }
+            if window.columns.isEmpty {
+                window.columns = [WorktreeColumn()]
             }
         }
         terminalSessionManager?.terminateAllSessionsForWorktree(worktreeID)
+        // Update focused pane if it was in a removed column
+        if let window = focusedWindow,
+           !window.columns.flatMap(\.panes).contains(where: { $0.id == focusedPaneID }) {
+            focusedPaneID = window.columns.first?.panes.first?.id
+        }
         saveState()
     }
 
@@ -173,7 +280,7 @@ final class SplitPaneManager {
 
     func addWindow() {
         let count = windows.count + 1
-        let newWindow = WindowState(name: "Window \(count)", panes: [PaneState()])
+        let newWindow = WindowState(name: "Window \(count)", columns: [WorktreeColumn()])
         windows.append(newWindow)
         focusWindow(id: newWindow.id)
         saveState()
@@ -183,10 +290,10 @@ final class SplitPaneManager {
         guard windows.count > 1 else { return }
         guard let index = windows.firstIndex(where: { $0.id == id }) else { return }
         let window = windows[index]
-        for pane in window.panes {
-            if let worktreeID = pane.worktreeID {
+        for column in window.columns {
+            if let worktreeID = column.worktreeID {
                 let othersHaveIt = windows.contains { w in
-                    w.id != id && w.panes.contains { $0.worktreeID == worktreeID }
+                    w.id != id && w.columns.contains { $0.worktreeID == worktreeID }
                 }
                 if !othersHaveIt {
                     terminalSessionManager?.terminateAllSessionsForWorktree(worktreeID)
@@ -197,7 +304,7 @@ final class SplitPaneManager {
         if focusedWindowID == id {
             let newIndex = max(0, index - 1)
             focusedWindowID = windows[newIndex].id
-            focusedPaneID = windows[newIndex].panes.first?.id
+            focusedPaneID = windows[newIndex].columns.first?.panes.first?.id
         }
         saveState()
     }
@@ -205,7 +312,7 @@ final class SplitPaneManager {
     func focusWindow(id: UUID) {
         guard let window = windows.first(where: { $0.id == id }) else { return }
         focusedWindowID = id
-        focusedPaneID = window.panes.first?.id
+        focusedPaneID = window.columns.first?.panes.first?.id
         saveState()
     }
 
@@ -226,7 +333,14 @@ final class SplitPaneManager {
     private struct WindowSaved: Codable {
         let id: String
         let name: String
-        let worktreeIDs: [String?]
+        let columns: [ColumnSaved]
+    }
+
+    private struct ColumnSaved: Codable {
+        let id: String
+        let worktreeID: String?
+        let paneCount: Int
+        let showRunnerPanel: Bool
     }
 
     private func saveState() {
@@ -235,7 +349,14 @@ final class SplitPaneManager {
                 WindowSaved(
                     id: w.id.uuidString,
                     name: w.name,
-                    worktreeIDs: w.panes.map(\.worktreeID)
+                    columns: w.columns.map { col in
+                        ColumnSaved(
+                            id: col.id.uuidString,
+                            worktreeID: col.worktreeID,
+                            paneCount: col.panes.count,
+                            showRunnerPanel: col.showRunnerPanel
+                        )
+                    }
                 )
             },
             focusedWindowID: focusedWindowID?.uuidString,
@@ -248,27 +369,67 @@ final class SplitPaneManager {
 
     private static func loadState() -> ([WindowState], UUID?, UUID?)? {
         guard let data = UserDefaults.standard.data(forKey: stateKey) else { return nil }
-        if let state = try? JSONDecoder().decode(SavedState.self, from: data), !state.windows.isEmpty {
+
+        // Try new column-based format
+        if let state = try? JSONDecoder().decode(SavedState.self, from: data),
+           !state.windows.isEmpty,
+           state.windows.first?.columns.isEmpty == false {
             let windows = state.windows.map { w in
                 WindowState(
                     id: UUID(uuidString: w.id) ?? UUID(),
                     name: w.name,
-                    panes: w.worktreeIDs.map { PaneState(worktreeID: $0) }
+                    columns: w.columns.map { col in
+                        let panes = (0..<max(1, col.paneCount)).map { _ in PaneState() }
+                        return WorktreeColumn(
+                            id: UUID(uuidString: col.id) ?? UUID(),
+                            worktreeID: col.worktreeID,
+                            panes: panes,
+                            showRunnerPanel: col.showRunnerPanel
+                        )
+                    }
                 )
             }
             let focusedWinID = state.focusedWindowID.flatMap { UUID(uuidString: $0) }
             let focusedPaneID = state.focusedPaneID.flatMap { UUID(uuidString: $0) }
             return (windows, focusedWinID, focusedPaneID)
         }
-        // Migrate from old flat format
-        struct LegacySavedState: Codable {
+
+        // Migrate from old window-based flat format (worktreeIDs per window)
+        struct LegacyWindowSaved: Codable {
+            let id: String
+            let name: String
             let worktreeIDs: [String?]
         }
-        if let legacy = try? JSONDecoder().decode(LegacySavedState.self, from: data), !legacy.worktreeIDs.isEmpty {
-            let panes = legacy.worktreeIDs.map { PaneState(worktreeID: $0) }
-            let window = WindowState(name: "Window 1", panes: panes)
-            return ([window], window.id, panes.first?.id)
+        struct LegacyState: Codable {
+            let windows: [LegacyWindowSaved]
+            let focusedWindowID: String?
+            let focusedPaneID: String?
         }
+        if let legacy = try? JSONDecoder().decode(LegacyState.self, from: data), !legacy.windows.isEmpty {
+            let windows = legacy.windows.map { w in
+                WindowState(
+                    id: UUID(uuidString: w.id) ?? UUID(),
+                    name: w.name,
+                    columns: w.worktreeIDs.map { wtId in
+                        WorktreeColumn(worktreeID: wtId)
+                    }
+                )
+            }
+            let focusedWinID = legacy.focusedWindowID.flatMap { UUID(uuidString: $0) }
+            let focusedPaneID = legacy.focusedPaneID.flatMap { UUID(uuidString: $0) }
+            return (windows, focusedWinID, focusedPaneID)
+        }
+
+        // Migrate from old flat format (single window)
+        struct OldFlatState: Codable {
+            let worktreeIDs: [String?]
+        }
+        if let flat = try? JSONDecoder().decode(OldFlatState.self, from: data), !flat.worktreeIDs.isEmpty {
+            let columns = flat.worktreeIDs.map { WorktreeColumn(worktreeID: $0) }
+            let window = WindowState(name: "Window 1", columns: columns)
+            return ([window], window.id, window.columns.first?.panes.first?.id)
+        }
+
         return nil
     }
 }
