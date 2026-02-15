@@ -57,10 +57,9 @@ final class SplitPaneManager {
             let focusedWin = restoredWindows.first { $0.id == self.focusedWindowID } ?? restoredWindows.first
             self.focusedPaneID = focusedWin?.columns.first?.panes.first?.id
         } else {
-            let initial = WindowState(name: "Window 1", columns: [WorktreeColumn()])
-            self.windows = [initial]
-            self.focusedWindowID = initial.id
-            self.focusedPaneID = initial.columns.first?.panes.first?.id
+            self.windows = []
+            self.focusedWindowID = nil
+            self.focusedPaneID = nil
         }
     }
 
@@ -159,11 +158,6 @@ final class SplitPaneManager {
         let column = sourceWindow.columns[colIndex]
         sourceWindow.columns.remove(at: colIndex)
 
-        // If source window has no columns left, add an empty one
-        if sourceWindow.columns.isEmpty {
-            sourceWindow.columns = [WorktreeColumn()]
-        }
-
         let count = windows.count + 1
         let newWindow = WindowState(name: "Window \(count)", columns: [column])
         windows.append(newWindow)
@@ -187,11 +181,6 @@ final class SplitPaneManager {
         let column = sourceWindow.columns[colIndex]
         sourceWindow.columns.remove(at: colIndex)
 
-        // If source window has no columns left, add an empty one
-        if sourceWindow.columns.isEmpty {
-            sourceWindow.columns = [WorktreeColumn()]
-        }
-
         targetWindow.columns.append(column)
         focusedWindowID = targetWindowID
         focusedPaneID = column.panes.first?.id
@@ -199,19 +188,15 @@ final class SplitPaneManager {
         saveState()
     }
 
-    /// Removes windows that have only empty columns (no worktreeID), unless it's the focused or last window.
+    /// Removes windows that have only empty columns (no worktreeID), unless it's the focused window.
     private func cleanupEmptyWindows() {
-        guard windows.count > 1 else { return }
         windows.removeAll { window in
             window.id != focusedWindowID
                 && window.columns.allSatisfy({ $0.worktreeID == nil })
         }
-        // Ensure at least one window remains
         if windows.isEmpty {
-            let initial = WindowState(name: "Window 1", columns: [WorktreeColumn()])
-            windows = [initial]
-            focusedWindowID = initial.id
-            focusedPaneID = initial.columns.first?.panes.first?.id
+            focusedWindowID = nil
+            focusedPaneID = nil
         }
     }
 
@@ -307,12 +292,18 @@ final class SplitPaneManager {
             let worktreeID = column.worktreeID
 
             if window.columns.count == 1 {
-                // Last column in window — clear worktree instead of removing
+                // Last column in window — remove the entire window
                 terminalSessionManager?.terminateSessionsForPane(column.panes[0].id.uuidString)
-                column.worktreeID = nil
                 if let worktreeID {
-                    terminalSessionManager?.terminateAllSessionsForWorktree(worktreeID)
+                    let othersHaveIt = windows.contains { w in
+                        w.id != window.id && w.columns.contains { $0.worktreeID == worktreeID }
+                    }
+                    if !othersHaveIt {
+                        terminalSessionManager?.terminateAllSessionsForWorktree(worktreeID)
+                    }
                 }
+                removeWindow(id: window.id)
+                return
             } else {
                 terminalSessionManager?.terminateSessionsForPane(column.panes[0].id.uuidString)
                 window.columns.remove(at: colIndex)
@@ -371,6 +362,7 @@ final class SplitPaneManager {
     }
 
     /// Clears a worktree from all columns that display it (across all windows).
+    /// Windows left with no columns are removed entirely.
     func clearWorktree(_ worktreeID: String) {
         for window in windows {
             for column in window.columns where column.worktreeID == worktreeID {
@@ -379,15 +371,21 @@ final class SplitPaneManager {
                 }
             }
             window.columns.removeAll { $0.worktreeID == worktreeID }
-            if window.columns.isEmpty {
-                window.columns = [WorktreeColumn()]
-            }
         }
+        // Remove windows that now have no columns
+        windows.removeAll { $0.columns.isEmpty }
         terminalSessionManager?.terminateAllSessionsForWorktree(worktreeID)
-        // Update focused pane if it was in a removed column
-        if let window = focusedWindow,
-           !window.columns.flatMap(\.panes).contains(where: { $0.id == focusedPaneID }) {
+        // Update focus
+        if windows.isEmpty {
+            focusedWindowID = nil
+            focusedPaneID = nil
+        } else if let window = focusedWindow,
+                  !window.columns.flatMap(\.panes).contains(where: { $0.id == focusedPaneID }) {
             focusedPaneID = window.columns.first?.panes.first?.id
+        } else if focusedWindow == nil {
+            // Focused window was removed — pick the first remaining
+            focusedWindowID = windows.first?.id
+            focusedPaneID = windows.first?.columns.first?.panes.first?.id
         }
         saveState()
     }
@@ -403,7 +401,6 @@ final class SplitPaneManager {
     }
 
     func removeWindow(id: UUID) {
-        guard windows.count > 1 else { return }
         guard let index = windows.firstIndex(where: { $0.id == id }) else { return }
         let window = windows[index]
         for column in window.columns {
@@ -421,9 +418,14 @@ final class SplitPaneManager {
         }
         windows.remove(at: index)
         if focusedWindowID == id {
-            let newIndex = max(0, index - 1)
-            focusedWindowID = windows[newIndex].id
-            focusedPaneID = windows[newIndex].columns.first?.panes.first?.id
+            if windows.isEmpty {
+                focusedWindowID = nil
+                focusedPaneID = nil
+            } else {
+                let newIndex = min(index, windows.count - 1)
+                focusedWindowID = windows[newIndex].id
+                focusedPaneID = windows[newIndex].columns.first?.panes.first?.id
+            }
         }
         saveState()
     }
@@ -491,9 +493,15 @@ final class SplitPaneManager {
         guard let data = UserDefaults.standard.data(forKey: stateKey) else { return nil }
 
         // Try new column-based format
-        if let state = try? JSONDecoder().decode(SavedState.self, from: data),
-           !state.windows.isEmpty,
-           state.windows.first?.columns.isEmpty == false {
+        if let state = try? JSONDecoder().decode(SavedState.self, from: data) {
+            // Valid saved state with 0 windows — restore empty state
+            if state.windows.isEmpty {
+                return ([], nil, nil)
+            }
+            guard state.windows.first?.columns.isEmpty == false else {
+                // Fall through to legacy formats below
+                return nil
+            }
             let windows = state.windows.map { w in
                 WindowState(
                     id: UUID(uuidString: w.id) ?? UUID(),

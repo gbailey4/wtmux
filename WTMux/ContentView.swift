@@ -355,14 +355,23 @@ struct ContentView: View {
                 Divider()
             }
 
-            windowTabBar
+            if !paneManager.windows.isEmpty {
+                windowTabBar
 
-            SplitPaneContainerView(
-                paneManager: paneManager,
-                terminalSessionManager: terminalSessionManager,
-                findWorktree: findWorktree
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                SplitPaneContainerView(
+                    paneManager: paneManager,
+                    terminalSessionManager: terminalSessionManager,
+                    findWorktree: findWorktree
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ContentUnavailableView(
+                    "No Windows Open",
+                    systemImage: "macwindow",
+                    description: Text("Select a worktree from the sidebar to get started.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
     }
 
@@ -415,16 +424,14 @@ struct ContentView: View {
                         paneManager.focusWindow(id: window.id)
                     }
             }
-            if paneManager.windows.count > 1 {
-                Button {
-                    paneManager.removeWindow(id: window.id)
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
-                }
-                .buttonStyle(.plain)
-                .help("Close Window")
+            Button {
+                paneManager.removeWindow(id: window.id)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
             }
+            .buttonStyle(.plain)
+            .help("Close Window")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -464,31 +471,22 @@ struct ContentView: View {
 
     private func handleCmdW() {
         guard let pane = paneManager.focusedPane else {
-            NSApp.keyWindow?.performClose(nil)
             return
         }
 
         let paneId = pane.id.uuidString
         guard let column = paneManager.column(forPane: pane.id),
               column.worktreeID != nil else {
-            // Empty pane/column
-            if paneManager.panes.count > 1 {
-                paneManager.closeFocusedPane()
-            } else {
-                NSApp.keyWindow?.performClose(nil)
-            }
+            // Empty pane/column — close the pane
+            paneManager.closeFocusedPane()
             return
         }
 
         let tabs = terminalSessionManager.orderedSessions(forPane: paneId)
         let activeId = terminalSessionManager.activeSessionId[paneId]
         guard let activeTab = tabs.first(where: { $0.id == activeId }) ?? tabs.last else {
-            // No tabs — cascade
-            if paneManager.panes.count > 1 {
-                paneManager.closeFocusedPane()
-            } else {
-                NSApp.keyWindow?.performClose(nil)
-            }
+            // No tabs — close the pane
+            paneManager.closeFocusedPane()
             return
         }
 
@@ -508,12 +506,7 @@ struct ContentView: View {
     private func cascadeAfterTabClose(paneId: String, paneManager: SplitPaneManager, terminalSessionManager: TerminalSessionManager) {
         let remaining = terminalSessionManager.orderedSessions(forPane: paneId)
         if !remaining.isEmpty { return }
-
-        if paneManager.panes.count > 1 {
-            paneManager.closeFocusedPane()
-        } else {
-            NSApp.keyWindow?.performClose(nil)
-        }
+        paneManager.closeFocusedPane()
     }
 
     private func handleCmdShiftW() {
