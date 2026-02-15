@@ -7,23 +7,30 @@ private let dragLogger = Logger(subsystem: "com.wtmux", category: "PaneHeaderDra
 
 struct PaneHeaderView: View {
     let pane: PaneState
+    let column: WorktreeColumn
     let paneManager: SplitPaneManager
     let terminalSessionManager: TerminalSessionManager
     let worktree: Worktree?
+    var showCloseButton: Bool = true
 
     @State private var showClosePaneAlert = false
 
     private var hasRunningProcesses: Bool {
-        guard let worktreeID = pane.worktreeID else { return false }
-        let tabs = terminalSessionManager.orderedSessions(forWorktree: worktreeID)
+        let tabs = terminalSessionManager.orderedSessions(forPane: pane.id.uuidString)
         return tabs.contains { $0.terminalView?.hasChildProcesses() == true }
     }
 
     var body: some View {
         HStack(spacing: 6) {
             if let worktree {
-                if let projectName = worktree.project?.name {
-                    Text(projectName)
+                if let project = worktree.project {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(projectColor(for: project))
+                        .frame(width: 3, height: 12)
+                    Image(systemName: project.resolvedIconName)
+                        .foregroundStyle(projectColor(for: project))
+                        .font(.caption)
+                    Text(project.name)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text("/")
@@ -41,7 +48,8 @@ struct PaneHeaderView: View {
 
             Spacer()
 
-            Button {
+            if showCloseButton {
+                Button {
                     if hasRunningProcesses {
                         showClosePaneAlert = true
                     } else {
@@ -54,6 +62,7 @@ struct PaneHeaderView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Close Pane")
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
@@ -66,8 +75,13 @@ struct PaneHeaderView: View {
         } message: {
             Text("This pane has running terminal processes. Closing it will terminate them.")
         }
+        .contextMenu {
+            Button("New Terminal in Split") {
+                paneManager.splitSameWorktree()
+            }
+        }
         .draggable(WorktreeReference(
-            worktreeID: pane.worktreeID ?? "",
+            worktreeID: column.worktreeID ?? "",
             sourcePaneID: pane.id.uuidString
         )) {
             HStack(spacing: 4) {

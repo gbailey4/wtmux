@@ -4,6 +4,7 @@ import WTTerminal
 
 struct PaneContentView: View {
     let pane: PaneState
+    let column: WorktreeColumn
     let paneManager: SplitPaneManager
     let terminalSessionManager: TerminalSessionManager
     let findWorktree: (String) -> Worktree?
@@ -13,7 +14,7 @@ struct PaneContentView: View {
     }
 
     private var worktree: Worktree? {
-        guard let id = pane.worktreeID else { return nil }
+        guard let id = column.worktreeID else { return nil }
         return findWorktree(id)
     }
 
@@ -24,13 +25,6 @@ struct PaneContentView: View {
         )
     }
 
-    private var showRunnerPanel: Binding<Bool> {
-        Binding(
-            get: { pane.showRunnerPanel },
-            set: { pane.showRunnerPanel = $0 }
-        )
-    }
-
     private var changedFileCount: Binding<Int> {
         Binding(
             get: { pane.changedFileCount },
@@ -38,19 +32,29 @@ struct PaneContentView: View {
         )
     }
 
+    private var showFocusBorder: Bool {
+        paneManager.columns.count > 1 || column.panes.count > 1
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            if paneManager.panes.count > 1 {
-                PaneHeaderView(pane: pane, paneManager: paneManager, terminalSessionManager: terminalSessionManager, worktree: worktree)
-                Divider()
-            }
+            PaneHeaderView(
+                pane: pane,
+                column: column,
+                paneManager: paneManager,
+                terminalSessionManager: terminalSessionManager,
+                worktree: worktree,
+                showCloseButton: showFocusBorder
+            )
+            Divider()
 
             if let worktree {
                 WorktreeDetailView(
                     worktree: worktree,
+                    paneId: pane.id.uuidString,
                     terminalSessionManager: terminalSessionManager,
+                    paneManager: paneManager,
                     showRightPanel: showRightPanel,
-                    showRunnerPanel: showRunnerPanel,
                     changedFileCount: changedFileCount,
                     isPaneFocused: isFocused
                 )
@@ -60,10 +64,7 @@ struct PaneContentView: View {
         }
         .overlay(
             RoundedRectangle(cornerRadius: 0)
-                .stroke(Color.accentColor, lineWidth: isFocused && paneManager.panes.count > 1 ? 2 : 0)
-        )
-        .overlay(
-            DropIndicatorView(zone: pane.dropZone)
+                .stroke(Color.accentColor, lineWidth: isFocused && showFocusBorder ? 2 : 0)
         )
         .contentShape(Rectangle())
         .onTapGesture {

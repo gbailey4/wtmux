@@ -19,7 +19,7 @@ struct SidebarView: View {
 
     private var selectedWorktreeID: Binding<String?> {
         Binding(
-            get: { paneManager.focusedPane?.worktreeID },
+            get: { paneManager.focusedColumn?.worktreeID },
             set: { newValue in
                 guard let worktreeID = newValue else { return }
                 if paneManager.visibleWorktreeIDs.contains(worktreeID) {
@@ -71,7 +71,7 @@ struct SidebarView: View {
                             hasRunConfigurations: hasRunConfigurations(for: worktree),
                             onStartRunners: {
                                 selectedWorktreeID.wrappedValue = worktree.path
-                                paneManager.focusedPane?.showRunnerPanel = true
+                                paneManager.focusedColumn?.showRunnerPanel = true
                                 requestStartRunners(for: worktree)
                             },
                             onStopRunners: { stopRunners(for: worktree) }
@@ -327,7 +327,7 @@ struct SidebarView: View {
         }
 
         Button {
-            paneManager.splitRight(worktreeID: worktree.path)
+            paneManager.openInSplit(worktreeID: worktree.path)
         } label: {
             Label("Open in New Split", systemImage: "rectangle.split.2x1")
         }
@@ -603,7 +603,7 @@ extension Color {
     }
 }
 
-private let projectColorPalette: [Color] = [
+let projectColorPalette: [Color] = [
     .blue,
     .green,
     .orange,
@@ -614,7 +614,7 @@ private let projectColorPalette: [Color] = [
     .cyan,
 ]
 
-private func projectColor(for project: Project) -> Color {
+func projectColor(for project: Project) -> Color {
     if let color = Color.fromPaletteName(project.colorName) {
         return color
     }
