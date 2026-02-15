@@ -68,6 +68,12 @@ targets:
           - CFBundleURLName: com.grahampark.wtmux
             CFBundleURLSchemes:
               - wtmux
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.grahampark.wtmux.worktree-reference
+            UTTypeDescription: WTMux Worktree Reference
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification: {}
     entitlements:
       path: WTMux/WTMux.entitlements
       properties:

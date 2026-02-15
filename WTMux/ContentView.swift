@@ -37,27 +37,61 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Project.sortOrder) private var projects: [Project]
 
-    @State private var selectedWorktreeID: String?
     @State private var showingAddProject = false
-    @State private var showRightPanel = false
-    @State private var showRunnerPanel = false
-    @State private var changedFileCount: Int = 0
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var terminalSessionManager = TerminalSessionManager()
-    @State private var claudeStatusManager = ClaudeStatusManager()
+    @Environment(ClaudeStatusManager.self) private var claudeStatusManager
     @State private var importObserver = ProjectImportObserver()
+    @State private var paneManager = SplitPaneManager()
     @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
     @State private var gitAvailable: Bool? = nil
     @State private var gitCheckDismissed = false
     @AppStorage("claudeIntegrationDismissed") private var claudeIntegrationDismissed = false
+    @State private var showCloseTabAlert = false
+    @State private var pendingCloseSessionId: String?
+    @State private var pendingPostCloseAction: (() -> Void)?
+    @State private var renamingWindowID: UUID?
+    @State private var windowRenameText: String = ""
+    @FocusState private var isWindowRenameFocused: Bool
+
+    private var selectedWorktreeID: Binding<String?> {
+        Binding(
+            get: { paneManager.focusedColumn?.worktreeID },
+            set: { newValue in
+                guard let worktreeID = newValue else { return }
+                // Programmatic usage (AddProjectView) — always open in new window
+                paneManager.openWorktreeInNewWindow(worktreeID: worktreeID)
+            }
+        )
+    }
+
+    private var showRightPanel: Binding<Bool> {
+        Binding(
+            get: { paneManager.focusedPane?.showRightPanel ?? false },
+            set: { paneManager.focusedPane?.showRightPanel = $0 }
+        )
+    }
+
+    private var showRunnerPanel: Binding<Bool> {
+        Binding(
+            get: { paneManager.focusedColumn?.showRunnerPanel ?? false },
+            set: { paneManager.focusedColumn?.showRunnerPanel = $0 }
+        )
+    }
+
+    private var changedFileCount: Binding<Int> {
+        Binding(
+            get: { paneManager.focusedPane?.changedFileCount ?? 0 },
+            set: { paneManager.focusedPane?.changedFileCount = $0 }
+        )
+    }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(
                 projects: projects,
-                selectedWorktreeID: $selectedWorktreeID,
+                paneManager: paneManager,
                 showingAddProject: $showingAddProject,
-                showRunnerPanel: $showRunnerPanel,
                 terminalSessionManager: terminalSessionManager,
                 claudeStatusManager: claudeStatusManager
             )
@@ -68,12 +102,12 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    showRightPanel.toggle()
+                    showRightPanel.wrappedValue.toggle()
                 } label: {
                     Image(systemName: "sidebar.right")
                         .overlay(alignment: .topTrailing) {
-                            if changedFileCount > 0 {
-                                Text("\(changedFileCount)")
+                            if changedFileCount.wrappedValue > 0 {
+                                Text("\(changedFileCount.wrappedValue)")
                                     .font(.system(size: 11, weight: .bold))
                                     .foregroundStyle(.white)
                                     .padding(.horizontal, 4)
@@ -86,16 +120,42 @@ struct ContentView: View {
                 .keyboardShortcut("d", modifiers: [.command, .shift])
                 .help("Toggle Diff Panel (Cmd+Shift+D)")
             }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    paneManager.splitRight()
+                } label: {
+                    Image(systemName: "rectangle.split.2x1")
+                }
+                .keyboardShortcut("\\", modifiers: [.command, .shift])
+                .help("Split Right (Cmd+Shift+\\)")
+                .disabled(paneManager.panes.count >= 5)
+            }
+        }
+        .background {
+            // Hidden buttons for keyboard shortcuts
+            Button("Close") { handleCmdW() }
+                .keyboardShortcut("w", modifiers: .command)
+                .hidden()
+            Button("Close Worktree") { handleCmdShiftW() }
+                .keyboardShortcut("w", modifiers: [.command, .shift])
+                .hidden()
+            Button("Focus Next Pane") { paneManager.focusNextPane() }
+                .keyboardShortcut("]", modifiers: .command)
+                .hidden()
+            Button("Focus Previous Pane") { paneManager.focusPreviousPane() }
+                .keyboardShortcut("[", modifiers: .command)
+                .hidden()
         }
         .task {
             appDelegate.terminalSessionManager = terminalSessionManager
+            paneManager.terminalSessionManager = terminalSessionManager
             await checkGitAvailability()
             backfillProjectColors()
             backfillSortOrders()
         }
         .sheet(isPresented: $showingAddProject) {
             AddProjectView(
-                selectedWorktreeID: $selectedWorktreeID,
+                selectedWorktreeID: selectedWorktreeID,
                 terminalSessionManager: terminalSessionManager
             )
         }
@@ -113,6 +173,22 @@ struct ContentView: View {
         .task { await pollForConfigFiles() }
         .onChange(of: projects) { registerWorktreePaths() }
         .onChange(of: totalWorktreeCount) { registerWorktreePaths() }
+        .alert("Close Terminal?", isPresented: $showCloseTabAlert) {
+            Button("Close", role: .destructive) {
+                if let id = pendingCloseSessionId {
+                    terminalSessionManager.removeTab(sessionId: id)
+                    pendingCloseSessionId = nil
+                }
+                pendingPostCloseAction?()
+                pendingPostCloseAction = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingCloseSessionId = nil
+                pendingPostCloseAction = nil
+            }
+        } message: {
+            Text("This terminal has a running process. Closing it will terminate the process.")
+        }
     }
 
     private var totalWorktreeCount: Int {
@@ -279,24 +355,181 @@ struct ContentView: View {
                 Divider()
             }
 
-            if let selectedWorktreeID,
-               let worktree = findWorktree(id: selectedWorktreeID) {
-                WorktreeDetailView(
-                    worktree: worktree,
-                    terminalSessionManager: terminalSessionManager,
-                    showRightPanel: $showRightPanel,
-                    showRunnerPanel: $showRunnerPanel,
-                    changedFileCount: $changedFileCount
-                )
-                .frame(maxHeight: .infinity)
-            } else {
-                ContentUnavailableView(
-                    "No Worktree Selected",
-                    systemImage: "terminal",
-                    description: Text("Select a worktree from the sidebar or add a project to get started.")
-                )
-                .frame(maxHeight: .infinity)
+            windowTabBar
+
+            SplitPaneContainerView(
+                paneManager: paneManager,
+                terminalSessionManager: terminalSessionManager,
+                findWorktree: findWorktree
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private var windowTabBar: some View {
+        HStack(spacing: 0) {
+            ForEach(paneManager.windows) { window in
+                windowTab(for: window)
             }
+            Button {
+                paneManager.addWindow()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.subheadline)
+                    .padding(6)
+            }
+            .buttonStyle(.plain)
+            .help("New Window")
+            Spacer()
+        }
+        .background(.bar)
+    }
+
+    @ViewBuilder
+    private func windowTab(for window: WindowState) -> some View {
+        let isSelected = paneManager.focusedWindowID == window.id
+        HStack(spacing: 4) {
+            if renamingWindowID == window.id {
+                TextField("Window name", text: $windowRenameText)
+                    .textFieldStyle(.plain)
+                    .font(.body)
+                    .lineLimit(1)
+                    .frame(minWidth: 60, maxWidth: 120)
+                    .focused($isWindowRenameFocused)
+                    .onSubmit { commitWindowRename(windowID: window.id) }
+                    .onChange(of: isWindowRenameFocused) { _, focused in
+                        if !focused { commitWindowRename(windowID: window.id) }
+                    }
+                    .onKeyPress(.escape) {
+                        cancelWindowRename()
+                        return .handled
+                    }
+            } else {
+                Text(window.name)
+                    .lineLimit(1)
+                    .onTapGesture(count: 2) {
+                        startWindowRename(window: window)
+                    }
+                    .onTapGesture(count: 1) {
+                        paneManager.focusWindow(id: window.id)
+                    }
+            }
+            if paneManager.windows.count > 1 {
+                Button {
+                    paneManager.removeWindow(id: window.id)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                }
+                .buttonStyle(.plain)
+                .help("Close Window")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+            .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
+        .contextMenu {
+            Button("Rename...") {
+                startWindowRename(window: window)
+            }
+        }
+        .onChange(of: paneManager.focusedWindowID) { _, _ in
+            if renamingWindowID == window.id {
+                commitWindowRename(windowID: window.id)
+            }
+        }
+    }
+
+    private func startWindowRename(window: WindowState) {
+        windowRenameText = window.name
+        renamingWindowID = window.id
+        isWindowRenameFocused = true
+    }
+
+    private func cancelWindowRename() {
+        renamingWindowID = nil
+    }
+
+    private func commitWindowRename(windowID: UUID) {
+        guard renamingWindowID == windowID else { return }
+        let trimmed = windowRenameText.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty {
+            paneManager.renameWindow(id: windowID, name: trimmed)
+        }
+        renamingWindowID = nil
+    }
+
+    // MARK: - Cmd+W / Cmd+Shift+W
+
+    private func handleCmdW() {
+        guard let pane = paneManager.focusedPane else {
+            NSApp.keyWindow?.performClose(nil)
+            return
+        }
+
+        let paneId = pane.id.uuidString
+        guard let column = paneManager.column(forPane: pane.id),
+              column.worktreeID != nil else {
+            // Empty pane/column
+            if paneManager.panes.count > 1 {
+                paneManager.closeFocusedPane()
+            } else {
+                NSApp.keyWindow?.performClose(nil)
+            }
+            return
+        }
+
+        let tabs = terminalSessionManager.orderedSessions(forPane: paneId)
+        let activeId = terminalSessionManager.activeSessionId[paneId]
+        guard let activeTab = tabs.first(where: { $0.id == activeId }) ?? tabs.last else {
+            // No tabs — cascade
+            if paneManager.panes.count > 1 {
+                paneManager.closeFocusedPane()
+            } else {
+                NSApp.keyWindow?.performClose(nil)
+            }
+            return
+        }
+
+        if activeTab.terminalView?.hasChildProcesses() == true {
+            pendingCloseSessionId = activeTab.id
+            pendingPostCloseAction = { [weak paneManager, weak terminalSessionManager] in
+                guard let paneManager, let terminalSessionManager else { return }
+                cascadeAfterTabClose(paneId: paneId, paneManager: paneManager, terminalSessionManager: terminalSessionManager)
+            }
+            showCloseTabAlert = true
+        } else {
+            terminalSessionManager.removeTab(sessionId: activeTab.id)
+            cascadeAfterTabClose(paneId: paneId, paneManager: paneManager, terminalSessionManager: terminalSessionManager)
+        }
+    }
+
+    private func cascadeAfterTabClose(paneId: String, paneManager: SplitPaneManager, terminalSessionManager: TerminalSessionManager) {
+        let remaining = terminalSessionManager.orderedSessions(forPane: paneId)
+        if !remaining.isEmpty { return }
+
+        if paneManager.panes.count > 1 {
+            paneManager.closeFocusedPane()
+        } else {
+            NSApp.keyWindow?.performClose(nil)
+        }
+    }
+
+    private func handleCmdShiftW() {
+        guard let column = paneManager.focusedColumn,
+              let worktreeID = column.worktreeID else { return }
+
+        let tabs = terminalSessionManager.sessions(forWorktree: worktreeID)
+        let hasRunning = tabs.contains { $0.terminalView?.hasChildProcesses() == true }
+
+        if hasRunning {
+            pendingPostCloseAction = { [weak paneManager] in
+                paneManager?.clearWorktree(worktreeID)
+            }
+            showCloseTabAlert = true
+        } else {
+            paneManager.clearWorktree(worktreeID)
         }
     }
 

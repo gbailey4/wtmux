@@ -9,6 +9,7 @@ private let logger = Logger(subsystem: "com.wtmux", category: "CreateWorktreeVie
 
 struct CreateWorktreeView: View {
     let project: Project
+    let paneManager: SplitPaneManager
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
@@ -123,6 +124,7 @@ struct CreateWorktreeView: View {
                 }
 
                 await MainActor.run {
+                    paneManager.openWorktreeInNewWindow(worktreeID: worktreePath)
                     dismiss()
                 }
             } catch {
