@@ -1,6 +1,5 @@
 import SwiftUI
 import WTCore
-import WTDiff
 import WTGit
 import WTTerminal
 import WTTransport
@@ -43,23 +42,23 @@ struct WorktreeDetailView: View {
         UUID(uuidString: paneId) ?? UUID()
     }
 
-    private var isDiffActive: Bool {
-        paneManager.activeDiffPaneID == paneUUID && paneManager.activeDiffFile != nil
-    }
-
     var body: some View {
-        Group {
-            if isDiffActive, let diffFile = paneManager.activeDiffFile {
-                diffContent(file: diffFile)
-            } else {
-                normalContent
+        HStack(spacing: 0) {
+            tabbedTerminalView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if showRightPanel {
+                Divider()
+                ChangesPanel(
+                    worktree: worktree,
+                    paneManager: paneManager,
+                    paneID: paneUUID,
+                    changedFileCount: $changedFileCount
+                )
+                .frame(width: 400)
             }
         }
         .task(id: "\(worktreeId)-\(paneId)") {
-            // Close diff if it belonged to this pane
-            if paneManager.activeDiffPaneID == UUID(uuidString: paneId) {
-                paneManager.closeDiff()
-            }
             changedFileCount = 0
             ensureFirstTab()
             let transport: CommandTransport = worktree.project.map { $0.makeTransport(connectionManager: sshConnectionManager) } ?? LocalTransport()
@@ -71,7 +70,7 @@ struct WorktreeDetailView: View {
         .alert("Close Terminal?", isPresented: $showCloseTabAlert) {
             Button("Close", role: .destructive) {
                 if let id = pendingCloseSessionId {
-                    terminalSessionManager.removeTab(sessionId: id)
+                    removeTabAndCascadeIfEmpty(sessionId: id)
                     pendingCloseSessionId = nil
                 }
             }
@@ -98,6 +97,13 @@ struct WorktreeDetailView: View {
             initialCommand: startCommand
         )
         configureSSHIfNeeded(session)
+    }
+
+    private func removeTabAndCascadeIfEmpty(sessionId: String) {
+        terminalSessionManager.removeTab(sessionId: sessionId)
+        if terminalSessionManager.orderedSessions(forPane: paneId).isEmpty {
+            paneManager.removePane(id: paneUUID)
+        }
     }
 
     // MARK: - Tabbed Terminal
@@ -156,6 +162,10 @@ struct WorktreeDetailView: View {
                     }
                 }
             }
+            .padding(4)
+            .background(Color(nsColor: currentTheme.background.toNSColor()))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .padding(2)
         }
     }
 
@@ -183,6 +193,7 @@ struct WorktreeDetailView: View {
                         .padding(.vertical, 6)
                 }
                 .buttonStyle(.plain)
+                .help("New Terminal Tab")
 
                 Divider()
                     .frame(height: 12)
@@ -203,6 +214,7 @@ struct WorktreeDetailView: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .help("Terminal Options")
             }
             .padding(.trailing, 4)
         }
@@ -262,13 +274,14 @@ struct WorktreeDetailView: View {
                     pendingCloseSessionId = session.id
                     showCloseTabAlert = true
                 } else {
-                    terminalSessionManager.removeTab(sessionId: session.id)
+                    removeTabAndCascadeIfEmpty(sessionId: session.id)
                 }
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .bold))
             }
             .buttonStyle(.plain)
+            .help("Close Tab")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -306,75 +319,4 @@ struct WorktreeDetailView: View {
         renamingTabId = nil
     }
 
-    // MARK: - Normal vs Diff Content
-
-    @ViewBuilder
-    private var normalContent: some View {
-        HStack(spacing: 0) {
-            tabbedTerminalView
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            if showRightPanel {
-                Divider()
-                ChangesPanel(
-                    worktree: worktree,
-                    paneManager: paneManager,
-                    paneID: paneUUID,
-                    changedFileCount: $changedFileCount
-                )
-                .frame(width: 400)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func diffContent(file: DiffFile) -> some View {
-        HStack(spacing: 0) {
-            DiffContentView(
-                file: file,
-                onClose: { paneManager.closeDiff() },
-                backgroundColor: currentTheme.background.toColor(),
-                foregroundColor: currentTheme.foreground.toColor()
-            ) {
-                openInEditorMenu(relativePath: file.displayPath)
-            }
-            .environment(\.colorScheme, currentTheme.isDark ? .dark : .light)
-
-            Divider()
-
-            ChangesPanel(
-                worktree: worktree,
-                paneManager: paneManager,
-                paneID: paneUUID,
-                changedFileCount: $changedFileCount
-            )
-            .frame(width: 400)
-        }
-        .onKeyPress(.escape) {
-            paneManager.closeDiff()
-            return .handled
-        }
-    }
-
-    @ViewBuilder
-    private func openInEditorMenu(relativePath: String) -> some View {
-        let editors = ExternalEditor.installedEditors(custom: ExternalEditor.customEditors)
-        Menu {
-            ForEach(editors) { editor in
-                Button(editor.name) {
-                    let fileURL = URL(fileURLWithPath: worktree.path)
-                        .appendingPathComponent(relativePath)
-                    ExternalEditor.open(fileURL: fileURL, editor: editor)
-                }
-            }
-            Divider()
-            SettingsLink {
-                Text("Configure Editors...")
-            }
-        } label: {
-            Image(systemName: "arrow.up.forward.square")
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-    }
 }

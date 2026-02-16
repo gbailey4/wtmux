@@ -116,6 +116,7 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
+                        .help("Remove Editor")
                     }
                 }
 

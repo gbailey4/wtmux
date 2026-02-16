@@ -58,6 +58,13 @@ struct ChangesPanel: View {
     @State private var isLoading = false
     @State private var commitFileCache: [String: [GitFileStatus]] = [:]
 
+    private var diffWindowFile: DiffFile? {
+        paneManager.windows.first(where: {
+            if case .diff(let path, _) = $0.kind { return path == worktree.path }
+            return false
+        })?.diffFile
+    }
+
     private var git: GitService {
         let transport: CommandTransport = worktree.project.map { $0.makeTransport(connectionManager: sshConnectionManager) } ?? LocalTransport()
         return GitService(transport: transport, repoPath: worktree.path)
@@ -77,14 +84,22 @@ struct ChangesPanel: View {
                     systemImage: "checkmark.circle",
                     description: Text(emptyStateDescription)
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 outlineView
+                    .overlay(alignment: .top) {
+                        if isLoading {
+                            ProgressView()
+                                .controlSize(.small)
+                                .padding(6)
+                        }
+                    }
             }
         }
         .task(id: "\(worktree.path)-\(diffViewMode)") {
             await loadAllChanges()
         }
-        .onChange(of: paneManager.activeDiffFile?.id) { _, newValue in
+        .onChange(of: diffWindowFile?.id) { _, newValue in
             if newValue == nil {
                 selectedFile = nil
             }
@@ -106,10 +121,6 @@ struct ChangesPanel: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .frame(width: 160)
-            if isLoading {
-                ProgressView()
-                    .controlSize(.small)
-            }
             Button {
                 Task { await refresh() }
             } label: {
@@ -142,7 +153,7 @@ struct ChangesPanel: View {
                        let file = diffFiles.first(where: {
                            $0.displayPath == path || $0.id == path || $0.oldPath == path || $0.newPath == path
                        }) {
-                        paneManager.showDiff(file: file, worktreePath: worktree.path, fromPane: paneID)
+                        paneManager.openDiffTab(file: file, worktreePath: worktree.path, branchName: worktree.branchName, fromPane: paneID)
                     }
                 }
             }
@@ -259,7 +270,6 @@ struct ChangesPanel: View {
     private func loadAllChanges() async {
         isLoading = true
         changedFileCount = 0
-        defer { isLoading = false }
 
         var groups: [ChangeGroup] = []
         let baseBranch = worktree.baseBranch
@@ -303,6 +313,7 @@ struct ChangesPanel: View {
             // Silently handle errors — the panel will show empty state
         }
 
+        isLoading = false
         changeGroups = groups
 
         // Update badge count
@@ -424,7 +435,13 @@ struct ChangesPanel: View {
         diffCache = [:]
         commitFileCache = [:]
         selectedFile = nil
-        paneManager.closeDiff()
+        // Close diff tab for this worktree if open
+        if let diffWindow = paneManager.windows.first(where: {
+            if case .diff(let path, _) = $0.kind { return path == worktree.path }
+            return false
+        }) {
+            paneManager.closeDiffTab(windowID: diffWindow.id)
+        }
         await loadAllChanges()
     }
 

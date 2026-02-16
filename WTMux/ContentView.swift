@@ -360,6 +360,7 @@ struct ContentView: View {
                             .font(.subheadline)
                     }
                     .buttonStyle(.plain)
+                    .help("Dismiss")
                 }
                 .padding(10)
                 .background(.yellow.opacity(0.15))
@@ -396,6 +397,7 @@ struct ContentView: View {
                             .font(.subheadline)
                     }
                     .buttonStyle(.plain)
+                    .help("Dismiss")
                 }
                 .padding(10)
                 .background(.blue.opacity(0.1))
@@ -405,19 +407,36 @@ struct ContentView: View {
             if !paneManager.windows.isEmpty {
                 windowTabBar
 
-                SplitPaneContainerView(
-                    paneManager: paneManager,
-                    terminalSessionManager: terminalSessionManager,
-                    findWorktree: findWorktree
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if let focusedWindow = paneManager.focusedWindow {
+                    switch focusedWindow.kind {
+                    case .worktrees:
+                        SplitPaneContainerView(
+                            paneManager: paneManager,
+                            terminalSessionManager: terminalSessionManager,
+                            findWorktree: findWorktree
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    case .diff:
+                        DiffTabView(
+                            window: focusedWindow,
+                            paneManager: paneManager,
+                            findWorktree: findWorktree
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
             } else {
                 ContentUnavailableView(
                     "No Windows Open",
-                    systemImage: "macwindow",
+                    image: "Logo",
                     description: Text("Select a worktree from the sidebar to get started.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay {
+                    WorktreeDropZone { worktreeID in
+                        paneManager.openWorktreeInNewWindow(worktreeID: worktreeID)
+                    }
+                }
             }
         }
     }
@@ -446,6 +465,11 @@ struct ContentView: View {
     private func windowTab(for window: WindowState) -> some View {
         let isSelected = paneManager.focusedWindowID == window.id
         HStack(spacing: 4) {
+            if case .diff = window.kind {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
             if renamingWindowID == window.id {
                 TextField("Window name", text: $windowRenameText)
                     .textFieldStyle(.plain)
@@ -476,6 +500,8 @@ struct ContentView: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .bold))
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("Close Window")
@@ -551,9 +577,10 @@ struct ContentView: View {
     // MARK: - Cmd+W / Cmd+Shift+W
 
     private func handleCmdW() {
-        // Close diff overlay first if active
-        if paneManager.activeDiffFile != nil {
-            paneManager.closeDiff()
+        // Close diff tab first if focused
+        if let focusedWindow = paneManager.focusedWindow,
+           case .diff = focusedWindow.kind {
+            paneManager.closeDiffTab(windowID: focusedWindow.id)
             return
         }
 
@@ -620,5 +647,54 @@ struct ContentView: View {
             }
         }
         return nil
+    }
+}
+
+// MARK: - WorktreeDropZone
+
+/// AppKit-level drop target for worktree drags.
+/// Reads the pasteboard synchronously (matching DroppableSplitView's proven approach)
+/// because SwiftUI's NSItemProvider async loading cancels for custom UTTypes.
+private struct WorktreeDropZone: NSViewRepresentable {
+    var onDrop: (String) -> Void
+
+    func makeNSView(context: Context) -> DropTargetView {
+        let view = DropTargetView()
+        view.onDrop = onDrop
+        return view
+    }
+
+    func updateNSView(_ nsView: DropTargetView, context: Context) {
+        nsView.onDrop = onDrop
+    }
+
+    final class DropTargetView: NSView {
+        var onDrop: ((String) -> Void)?
+
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            registerForDraggedTypes([WorktreeReference.pasteboardType])
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError() }
+
+        // Pass clicks through to the SwiftUI view underneath
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { .move }
+
+        override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            let pasteboard = sender.draggingPasteboard
+            var data = pasteboard.data(forType: WorktreeReference.pasteboardType)
+            if data == nil, let item = pasteboard.pasteboardItems?.first {
+                data = item.data(forType: WorktreeReference.pasteboardType)
+            }
+            guard let data,
+                  let ref = try? JSONDecoder().decode(WorktreeReference.self, from: data)
+            else { return false }
+            onDrop?(ref.worktreeID)
+            return true
+        }
     }
 }

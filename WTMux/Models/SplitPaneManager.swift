@@ -12,21 +12,35 @@ final class SplitPaneManager {
     var focusedWindowID: UUID?
     var focusedPaneID: UUID?
 
-    // MARK: - Diff State (window-level)
-    var activeDiffFile: DiffFile?
-    var activeDiffWorktreePath: String?
-    var activeDiffPaneID: UUID?
+    // MARK: - Diff Tabs
 
-    func showDiff(file: DiffFile, worktreePath: String, fromPane paneID: UUID) {
-        activeDiffFile = file
-        activeDiffWorktreePath = worktreePath
-        activeDiffPaneID = paneID
+    func openDiffTab(file: DiffFile, worktreePath: String, branchName: String, fromPane paneID: UUID) {
+        // Search for existing diff tab for the same worktreePath
+        if let existing = windows.first(where: {
+            if case .diff(let path, _) = $0.kind { return path == worktreePath }
+            return false
+        }) {
+            existing.diffFile = file
+            existing.diffSourcePaneID = paneID
+            focusedWindowID = existing.id
+            return
+        }
+
+        // Create new diff tab
+        let projectName = worktreePath.components(separatedBy: "/").last ?? "Unknown"
+        let newWindow = WindowState(
+            name: "Diff \u{2014} \(projectName) / \(branchName)",
+            columns: [],
+            kind: .diff(worktreePath: worktreePath, branchName: branchName)
+        )
+        newWindow.diffFile = file
+        newWindow.diffSourcePaneID = paneID
+        windows.append(newWindow)
+        focusedWindowID = newWindow.id
     }
 
-    func closeDiff() {
-        activeDiffFile = nil
-        activeDiffWorktreePath = nil
-        activeDiffPaneID = nil
+    func closeDiffTab(windowID: UUID) {
+        removeWindow(id: windowID)
     }
 
     var focusedWindow: WindowState? {
@@ -303,11 +317,6 @@ final class SplitPaneManager {
               let colIndex = window.columns.firstIndex(where: { $0.panes.contains { $0.id == id } }),
               let paneIndex = window.columns[colIndex].panes.firstIndex(where: { $0.id == id }) else { return }
 
-        // Close diff if it belongs to this pane
-        if activeDiffPaneID == id {
-            closeDiff()
-        }
-
         let column = window.columns[colIndex]
 
         if column.panes.count == 1 {
@@ -373,6 +382,55 @@ final class SplitPaneManager {
         focusedPaneID = allPanes[prevIndex].id
     }
 
+    // MARK: - Move Operations (preserves pane IDs and terminal sessions)
+
+    /// Repositions a column within the focused window without destroying it.
+    func moveColumn(id: UUID, toIndex: Int) {
+        guard let window = focusedWindow,
+              let fromIndex = window.columns.firstIndex(where: { $0.id == id }) else { return }
+        let column = window.columns.remove(at: fromIndex)
+        let clampedIndex = max(0, min(toIndex, window.columns.count))
+        window.columns.insert(column, at: clampedIndex)
+        saveState()
+    }
+
+    /// Extracts a pane from a multi-pane column into a new single-pane column at the given index.
+    /// The pane's UUID is preserved, keeping terminal sessions alive.
+    func extractPaneToColumn(paneID: UUID, at index: Int) {
+        guard let window = focusedWindow,
+              let sourceCol = window.columns.first(where: { $0.panes.contains { $0.id == paneID } }),
+              sourceCol.panes.count > 1,
+              let paneIndex = sourceCol.panes.firstIndex(where: { $0.id == paneID }) else { return }
+
+        let pane = sourceCol.panes.remove(at: paneIndex)
+        let newColumn = WorktreeColumn(worktreeID: sourceCol.worktreeID, panes: [pane])
+        let clampedIndex = max(0, min(index, window.columns.count))
+        window.columns.insert(newColumn, at: clampedIndex)
+        focusedPaneID = pane.id
+        saveState()
+    }
+
+    /// Moves a pane to an existing target column. Removes the source column if left empty.
+    /// The pane's UUID is preserved, keeping terminal sessions alive.
+    func movePaneToColumn(paneID: UUID, targetColumnID: UUID) {
+        guard let window = focusedWindow,
+              let sourceCol = window.columns.first(where: { $0.panes.contains { $0.id == paneID } }),
+              let targetCol = window.columns.first(where: { $0.id == targetColumnID }),
+              sourceCol.id != targetCol.id,
+              let paneIndex = sourceCol.panes.firstIndex(where: { $0.id == paneID }) else { return }
+
+        let pane = sourceCol.panes.remove(at: paneIndex)
+        targetCol.panes.append(pane)
+
+        // If source column is now empty, remove it
+        if sourceCol.panes.isEmpty {
+            window.columns.removeAll { $0.id == sourceCol.id }
+        }
+
+        focusedPaneID = pane.id
+        saveState()
+    }
+
     func insertColumn(worktreeID: String?, at index: Int) {
         guard let window = focusedWindow else { return }
         let totalPanes = window.columns.flatMap(\.panes).count
@@ -387,11 +445,6 @@ final class SplitPaneManager {
     /// Clears a worktree from all columns that display it (across all windows).
     /// Windows left with no columns are removed entirely.
     func clearWorktree(_ worktreeID: String) {
-        // Close diff if it belongs to this worktree
-        if activeDiffWorktreePath == worktreeID {
-            closeDiff()
-        }
-
         for window in windows {
             for column in window.columns where column.worktreeID == worktreeID {
                 for pane in column.panes {
@@ -400,8 +453,16 @@ final class SplitPaneManager {
             }
             window.columns.removeAll { $0.worktreeID == worktreeID }
         }
-        // Remove windows that now have no columns
-        windows.removeAll { $0.columns.isEmpty }
+        // Remove worktree windows that now have no columns, and diff windows for this worktree
+        windows.removeAll { window in
+            if case .diff(let path, _) = window.kind, path == worktreeID {
+                return true
+            }
+            return window.columns.isEmpty && {
+                if case .worktrees = window.kind { return true }
+                return false
+            }()
+        }
         terminalSessionManager?.terminateAllSessionsForWorktree(worktreeID)
         // Update focus
         if windows.isEmpty {
@@ -431,23 +492,19 @@ final class SplitPaneManager {
     func removeWindow(id: UUID) {
         guard let index = windows.firstIndex(where: { $0.id == id }) else { return }
         let window = windows[index]
-
-        // Close diff if it belongs to a pane in this window
-        if let diffPaneID = activeDiffPaneID,
-           window.columns.flatMap(\.panes).contains(where: { $0.id == diffPaneID }) {
-            closeDiff()
-        }
-
-        for column in window.columns {
-            for pane in column.panes {
-                terminalSessionManager?.terminateSessionsForPane(pane.id.uuidString)
-            }
-            if let worktreeID = column.worktreeID {
-                let othersHaveIt = windows.contains { w in
-                    w.id != id && w.columns.contains { $0.worktreeID == worktreeID }
+        // Only clean up terminal sessions for worktree windows (diff tabs have no sessions)
+        if case .worktrees = window.kind {
+            for column in window.columns {
+                for pane in column.panes {
+                    terminalSessionManager?.terminateSessionsForPane(pane.id.uuidString)
                 }
-                if !othersHaveIt {
-                    terminalSessionManager?.terminateAllSessionsForWorktree(worktreeID)
+                if let worktreeID = column.worktreeID {
+                    let othersHaveIt = windows.contains { w in
+                        w.id != id && w.columns.contains { $0.worktreeID == worktreeID }
+                    }
+                    if !othersHaveIt {
+                        terminalSessionManager?.terminateAllSessionsForWorktree(worktreeID)
+                    }
                 }
             }
         }
@@ -501,8 +558,12 @@ final class SplitPaneManager {
     }
 
     private func saveState() {
+        let worktreeWindows = windows.filter {
+            if case .worktrees = $0.kind { return true }
+            return false
+        }
         let state = SavedState(
-            windows: windows.map { w in
+            windows: worktreeWindows.map { w in
                 WindowSaved(
                     id: w.id.uuidString,
                     name: w.name,

@@ -771,10 +771,11 @@ struct WorktreeRow: View {
             if !isDeleting, isVisibleInPane {
                 Circle()
                     .fill(Color.accentColor)
-                    .frame(width: 6, height: 6)
+                    .frame(width: 8, height: 8)
                     .help("Visible in pane")
             }
         }
+        .padding(.vertical, 2)
         .opacity(isDeleting ? 0.5 : 1.0)
         .onHover { hovering in
             isHovered = hovering

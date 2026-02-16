@@ -232,6 +232,7 @@ struct ProjectSettingsView: View {
                                 Image(systemName: "minus.circle")
                             }
                             .buttonStyle(.plain)
+                            .help("Remove")
                         }
                     }
                     Button {
@@ -253,6 +254,7 @@ struct ProjectSettingsView: View {
                                 Image(systemName: "minus.circle")
                             }
                             .buttonStyle(.plain)
+                            .help("Remove")
                         }
                     }
                     Button {
@@ -296,6 +298,7 @@ struct ProjectSettingsView: View {
                                     Image(systemName: "minus.circle")
                                 }
                                 .buttonStyle(.plain)
+                                .help("Remove")
                             }
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Command")
