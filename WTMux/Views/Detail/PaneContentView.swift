@@ -44,7 +44,7 @@ struct PaneContentView: View {
                 paneManager: paneManager,
                 terminalSessionManager: terminalSessionManager,
                 worktree: worktree,
-                showCloseButton: showFocusBorder
+                isActive: isFocused
             )
             Divider()
 
@@ -62,10 +62,11 @@ struct PaneContentView: View {
                 emptyPanePlaceholder
             }
         }
-        .overlay(
-            RoundedRectangle(cornerRadius: 0)
-                .stroke(Color.accentColor, lineWidth: isFocused && showFocusBorder ? 2 : 0)
-        )
+        .overlay(alignment: .top) {
+            if isFocused && showFocusBorder {
+                Color.accentColor.frame(height: 2)
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture {
             paneManager.focusedPaneID = pane.id

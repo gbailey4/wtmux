@@ -13,8 +13,8 @@ struct ColumnPanesView: NSViewControllerRepresentable {
 
     private static let minimumPaneWidth: CGFloat = 200
 
-    func makeNSViewController(context: Context) -> NSSplitViewController {
-        let controller = NSSplitViewController()
+    func makeNSViewController(context: Context) -> EqualSplitViewController {
+        let controller = EqualSplitViewController()
         let splitView = NSSplitView()
         splitView.isVertical = true
         splitView.dividerStyle = .thin
@@ -29,7 +29,7 @@ struct ColumnPanesView: NSViewControllerRepresentable {
         return controller
     }
 
-    func updateNSViewController(_ controller: NSSplitViewController, context: Context) {
+    func updateNSViewController(_ controller: EqualSplitViewController, context: Context) {
         context.coordinator.column = column
         context.coordinator.paneManager = paneManager
         context.coordinator.terminalSessionManager = terminalSessionManager
@@ -82,19 +82,9 @@ struct ColumnPanesView: NSViewControllerRepresentable {
                 itemMap.append((paneID: pane.id, item: item, host: host))
             }
 
-            // Equalize pane widths after layout
-            DispatchQueue.main.async { [weak controller] in
-                guard let sv = controller?.splitView, sv.subviews.count > 1 else { return }
-                sv.layoutSubtreeIfNeeded()
-                let total = sv.isVertical
-                    ? (sv.visibleRect.width > 0 ? sv.visibleRect.width : sv.bounds.width)
-                    : (sv.visibleRect.height > 0 ? sv.visibleRect.height : sv.bounds.height)
-                guard total > 0 else { return }
-                let count = sv.subviews.count
-                let share = total / CGFloat(count)
-                for i in 0..<(count - 1) {
-                    sv.setPosition(share * CGFloat(i + 1), ofDividerAt: i)
-                }
+            // Equalize pane widths via controller
+            if let eqController = controller as? EqualSplitViewController {
+                eqController.equalizeDividers()
             }
         }
 
@@ -148,26 +138,16 @@ struct ColumnPanesView: NSViewControllerRepresentable {
                 }
             }
 
-            // Equalize pane widths after layout
-            DispatchQueue.main.async { [weak controller] in
-                guard let sv = controller?.splitView, sv.subviews.count > 1 else { return }
-                sv.layoutSubtreeIfNeeded()
-                let total = sv.isVertical
-                    ? (sv.visibleRect.width > 0 ? sv.visibleRect.width : sv.bounds.width)
-                    : (sv.visibleRect.height > 0 ? sv.visibleRect.height : sv.bounds.height)
-                guard total > 0 else { return }
-                let count = sv.subviews.count
-                let share = total / CGFloat(count)
-                for i in 0..<(count - 1) {
-                    sv.setPosition(share * CGFloat(i + 1), ofDividerAt: i)
-                }
+            // Equalize pane widths via controller
+            if let eqController = controller as? EqualSplitViewController {
+                eqController.equalizeDividers()
             }
         }
 
         private func makeHostingController(for pane: PaneState) -> NSHostingController<AnyView> {
             let view = makeView(for: pane)
             let host = NSHostingController(rootView: view)
-            host.view.translatesAutoresizingMaskIntoConstraints = false
+            host.sizingOptions = []
             return host
         }
 

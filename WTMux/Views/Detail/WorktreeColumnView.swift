@@ -80,26 +80,20 @@ struct WorktreeColumnView: View {
 
             // Shared runner panel
             if let worktree {
-                let runnerTabs = terminalSessionManager.runnerSessions(forWorktree: worktree.path)
-                if column.showRunnerPanel && (!runnerTabs.isEmpty || hasRunConfigurations) {
-                    Divider()
-                    RunnerPanelView(
-                        worktree: worktree,
-                        terminalSessionManager: terminalSessionManager,
-                        showRunnerPanel: showRunnerPanelBinding,
-                        isPaneFocused: isFocused
-                    )
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: 150, idealHeight: 250, maxHeight: 350)
-                } else if hasRunConfigurations || !runnerTabs.filter({ !SessionID.isSetup($0.id) }).isEmpty {
-                    Divider()
-                    RunnerPanelView(
-                        worktree: worktree,
-                        terminalSessionManager: terminalSessionManager,
-                        showRunnerPanel: showRunnerPanelBinding,
-                        isPaneFocused: isFocused
-                    )
-                }
+                Divider()
+                RunnerPanelView(
+                    worktree: worktree,
+                    terminalSessionManager: terminalSessionManager,
+                    paneManager: paneManager,
+                    showRunnerPanel: showRunnerPanelBinding,
+                    isPaneFocused: isFocused
+                )
+                .frame(maxWidth: .infinity)
+                .frame(
+                    minHeight: column.showRunnerPanel ? 150 : nil,
+                    idealHeight: column.showRunnerPanel ? 250 : nil,
+                    maxHeight: column.showRunnerPanel ? 350 : nil
+                )
             }
         }
         .overlay(
@@ -157,6 +151,7 @@ struct WorktreeColumnView: View {
                     .font(.subheadline)
             }
             .buttonStyle(.plain)
+            .help("Dismiss")
         }
         .padding(10)
         .background(.orange.opacity(0.1))
@@ -184,6 +179,7 @@ struct WorktreeColumnView: View {
                 let runner = RunnerPanelView(
                     worktree: worktree,
                     terminalSessionManager: terminalSessionManager,
+                    paneManager: paneManager,
                     showRunnerPanel: showRunnerPanelBinding,
                     isPaneFocused: isFocused
                 )
@@ -199,6 +195,7 @@ struct WorktreeColumnView: View {
                     .font(.subheadline)
             }
             .buttonStyle(.plain)
+            .help("Dismiss")
         }
         .padding(10)
         .background(.blue.opacity(0.1))
