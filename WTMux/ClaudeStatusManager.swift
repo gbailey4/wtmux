@@ -46,6 +46,12 @@ final class ClaudeStatusManager {
         logger.info("Registered \(self.knownWorktreePaths.count) worktree paths: \(self.knownWorktreePaths.sorted())")
     }
 
+    // MARK: - Remote Events
+
+    func handleRemoteEvent(status: String, cwd: String, sessionId: String) {
+        handleEvent(status: status, cwd: cwd, sessionId: sessionId)
+    }
+
     // MARK: - Private
 
     private func normalizePath(_ path: String) -> String {

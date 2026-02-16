@@ -4,6 +4,7 @@ import WTDiff
 import WTGit
 import WTTerminal
 import WTTransport
+import WTSSH
 
 struct WorktreeDetailView: View {
     let worktree: Worktree
@@ -14,9 +15,9 @@ struct WorktreeDetailView: View {
     @Binding var changedFileCount: Int
     var isPaneFocused: Bool = true
 
+    @Environment(\.sshConnectionManager) private var sshConnectionManager
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
 
-    @State private var activeDiffFile: DiffFile?
     @State private var showCloseTabAlert = false
     @State private var pendingCloseSessionId: String?
     @State private var renamingTabId: String?
@@ -38,39 +39,31 @@ struct WorktreeDetailView: View {
         terminalSessionManager.activeSessionId[paneId]
     }
 
+    private var paneUUID: UUID {
+        UUID(uuidString: paneId) ?? UUID()
+    }
+
+    private var isDiffActive: Bool {
+        paneManager.activeDiffPaneID == paneUUID && paneManager.activeDiffFile != nil
+    }
+
     var body: some View {
-        HStack(spacing: 0) {
-            ZStack {
-                // Main terminal tabs
-                tabbedTerminalView
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                // Diff overlay
-                if let file = activeDiffFile {
-                    DiffContentView(
-                        file: file,
-                        onClose: { activeDiffFile = nil },
-                        backgroundColor: currentTheme.background.toColor(),
-                        foregroundColor: currentTheme.foreground.toColor()
-                    ) {
-                        openInEditorMenu(relativePath: file.displayPath)
-                    }
-                    .environment(\.colorScheme, currentTheme.isDark ? .dark : .light)
-                }
-            }
-
-            // Right panel: Changes outline
-            if showRightPanel {
-                Divider()
-                ChangesPanel(worktree: worktree, activeDiffFile: $activeDiffFile, changedFileCount: $changedFileCount)
-                    .frame(width: 400)
+        Group {
+            if isDiffActive, let diffFile = paneManager.activeDiffFile {
+                diffContent(file: diffFile)
+            } else {
+                normalContent
             }
         }
         .task(id: "\(worktreeId)-\(paneId)") {
-            activeDiffFile = nil
+            // Close diff if it belonged to this pane
+            if paneManager.activeDiffPaneID == UUID(uuidString: paneId) {
+                paneManager.closeDiff()
+            }
             changedFileCount = 0
             ensureFirstTab()
-            let git = GitService(transport: LocalTransport(), repoPath: worktree.path)
+            let transport: CommandTransport = worktree.project.map { $0.makeTransport(connectionManager: sshConnectionManager) } ?? LocalTransport()
+            let git = GitService(transport: transport, repoPath: worktree.path)
             if let files = try? await git.status() {
                 changedFileCount = files.count
             }
@@ -98,36 +91,13 @@ struct WorktreeDetailView: View {
             return cmd
         }()
 
-        _ = terminalSessionManager.createTab(
+        let session = terminalSessionManager.createTab(
             forPane: paneId,
             worktreeId: worktreeId,
             workingDirectory: worktree.path,
             initialCommand: startCommand
         )
-    }
-
-    // MARK: - Open In Editor
-
-    @ViewBuilder
-    private func openInEditorMenu(relativePath: String) -> some View {
-        let editors = ExternalEditor.installedEditors(custom: ExternalEditor.customEditors)
-        Menu {
-            ForEach(editors) { editor in
-                Button(editor.name) {
-                    let fileURL = URL(fileURLWithPath: worktree.path)
-                        .appendingPathComponent(relativePath)
-                    ExternalEditor.open(fileURL: fileURL, editor: editor)
-                }
-            }
-            Divider()
-            SettingsLink {
-                Text("Configure Editors...")
-            }
-        } label: {
-            Image(systemName: "arrow.up.forward.square")
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
+        configureSSHIfNeeded(session)
     }
 
     // MARK: - Tabbed Terminal
@@ -137,12 +107,21 @@ struct WorktreeDetailView: View {
             guard let cmd = worktree.project?.profile?.terminalStartCommand, !cmd.isEmpty else { return nil }
             return cmd
         }()
-        _ = terminalSessionManager.createTab(
+        let session = terminalSessionManager.createTab(
             forPane: paneId,
             worktreeId: worktreeId,
             workingDirectory: worktree.path,
             initialCommand: startCommand
         )
+        configureSSHIfNeeded(session)
+    }
+
+    private func configureSSHIfNeeded(_ session: TerminalSession) {
+        guard let project = worktree.project, project.isRemote,
+              let config = project.sshConfig() else { return }
+        session.isSSH = true
+        session.sshConnectionManager = sshConnectionManager
+        session.sshConnectionConfig = config
     }
 
     @ViewBuilder
@@ -154,9 +133,15 @@ struct WorktreeDetailView: View {
             ZStack {
                 ForEach(terminalTabs) { session in
                     let isActiveTab = session.id == activeTabId
-                    TerminalRepresentable(session: session, isActive: isActiveTab && isPaneFocused, theme: currentTheme)
-                        .opacity(isActiveTab ? 1 : 0)
-                        .allowsHitTesting(isActiveTab)
+                    if session.isSSH {
+                        SSHTerminalRepresentable(session: session, isActive: isActiveTab && isPaneFocused, theme: currentTheme)
+                            .opacity(isActiveTab ? 1 : 0)
+                            .allowsHitTesting(isActiveTab)
+                    } else {
+                        TerminalRepresentable(session: session, isActive: isActiveTab && isPaneFocused, theme: currentTheme)
+                            .opacity(isActiveTab ? 1 : 0)
+                            .allowsHitTesting(isActiveTab)
+                    }
                 }
                 if terminalTabs.isEmpty {
                     ContentUnavailableView {
@@ -270,7 +255,10 @@ struct WorktreeDetailView: View {
             }
 
             Button {
-                if session.terminalView?.hasChildProcesses() == true {
+                let hasRunningProcess = session.isSSH
+                    ? (session.sshTerminalView?.isSessionActive == true)
+                    : (session.terminalView?.hasChildProcesses() == true)
+                if hasRunningProcess {
                     pendingCloseSessionId = session.id
                     showCloseTabAlert = true
                 } else {
@@ -316,5 +304,77 @@ struct WorktreeDetailView: View {
 
     private func cancelRename() {
         renamingTabId = nil
+    }
+
+    // MARK: - Normal vs Diff Content
+
+    @ViewBuilder
+    private var normalContent: some View {
+        HStack(spacing: 0) {
+            tabbedTerminalView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if showRightPanel {
+                Divider()
+                ChangesPanel(
+                    worktree: worktree,
+                    paneManager: paneManager,
+                    paneID: paneUUID,
+                    changedFileCount: $changedFileCount
+                )
+                .frame(width: 400)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func diffContent(file: DiffFile) -> some View {
+        HStack(spacing: 0) {
+            DiffContentView(
+                file: file,
+                onClose: { paneManager.closeDiff() },
+                backgroundColor: currentTheme.background.toColor(),
+                foregroundColor: currentTheme.foreground.toColor()
+            ) {
+                openInEditorMenu(relativePath: file.displayPath)
+            }
+            .environment(\.colorScheme, currentTheme.isDark ? .dark : .light)
+
+            Divider()
+
+            ChangesPanel(
+                worktree: worktree,
+                paneManager: paneManager,
+                paneID: paneUUID,
+                changedFileCount: $changedFileCount
+            )
+            .frame(width: 400)
+        }
+        .onKeyPress(.escape) {
+            paneManager.closeDiff()
+            return .handled
+        }
+    }
+
+    @ViewBuilder
+    private func openInEditorMenu(relativePath: String) -> some View {
+        let editors = ExternalEditor.installedEditors(custom: ExternalEditor.customEditors)
+        Menu {
+            ForEach(editors) { editor in
+                Button(editor.name) {
+                    let fileURL = URL(fileURLWithPath: worktree.path)
+                        .appendingPathComponent(relativePath)
+                    ExternalEditor.open(fileURL: fileURL, editor: editor)
+                }
+            }
+            Divider()
+            SettingsLink {
+                Text("Configure Editors...")
+            }
+        } label: {
+            Image(systemName: "arrow.up.forward.square")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 }

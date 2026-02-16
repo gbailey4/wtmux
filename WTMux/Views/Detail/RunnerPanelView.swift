@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import WTCore
 import WTTerminal
+import WTSSH
 
 /// Self-contained runner panel view that handles both expanded (terminal) and collapsed (status bar) states.
 /// Placed at the column level so runners are shared across all panes showing the same worktree.
@@ -12,6 +13,7 @@ struct RunnerPanelView: View {
     var isPaneFocused: Bool = true
 
     @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
+    @Environment(\.sshConnectionManager) private var sshConnectionManager
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
 
     @State private var showRunnerConflictAlert = false
@@ -107,9 +109,15 @@ struct RunnerPanelView: View {
             ZStack {
                 ForEach(runnerTabs) { session in
                     let isActiveRunner = session.id == activeRunnerTabId
-                    TerminalRepresentable(session: session, isActive: isActiveRunner && isPaneFocused, theme: currentTheme)
-                        .opacity(isActiveRunner ? 1 : 0)
-                        .allowsHitTesting(isActiveRunner)
+                    if session.isSSH {
+                        SSHTerminalRepresentable(session: session, isActive: isActiveRunner && isPaneFocused, theme: currentTheme)
+                            .opacity(isActiveRunner ? 1 : 0)
+                            .allowsHitTesting(isActiveRunner)
+                    } else {
+                        TerminalRepresentable(session: session, isActive: isActiveRunner && isPaneFocused, theme: currentTheme)
+                            .opacity(isActiveRunner ? 1 : 0)
+                            .allowsHitTesting(isActiveRunner)
+                    }
                 }
 
                 if let session = activeSession, session.deferExecution {
@@ -707,6 +715,12 @@ struct RunnerPanelView: View {
         )
         session.onProcessExit = { [weak terminalSessionManager] sessionId, exitCode in
             terminalSessionManager?.handleProcessExit(sessionId: sessionId, exitCode: exitCode)
+        }
+        // Configure SSH if remote project
+        if let project = worktree.project, project.isRemote, let sshConfig = project.sshConfig() {
+            session.isSSH = true
+            session.sshConnectionManager = sshConnectionManager
+            session.sshConnectionConfig = sshConfig
         }
     }
 

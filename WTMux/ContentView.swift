@@ -5,6 +5,7 @@ import WTCore
 import WTGit
 import WTTerminal
 import WTTransport
+import WTSSH
 
 @MainActor @Observable
 final class ProjectImportObserver {
@@ -44,6 +45,8 @@ struct ContentView: View {
     @State private var importObserver = ProjectImportObserver()
     @State private var paneManager = SplitPaneManager()
     @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
+    @Environment(\.sshConnectionManager) private var sshConnectionManager
+    @Environment(\.sshStatusPoller) private var sshStatusPoller
     @State private var gitAvailable: Bool? = nil
     @State private var gitCheckDismissed = false
     @AppStorage("claudeIntegrationDismissed") private var claudeIntegrationDismissed = false
@@ -173,6 +176,7 @@ struct ContentView: View {
         }
         .task { registerWorktreePaths() }
         .task { await pollForConfigFiles() }
+        .task { await startRemotePolling() }
         .onChange(of: projects) { registerWorktreePaths() }
         .onChange(of: totalWorktreeCount) { registerWorktreePaths() }
         .alert("Close Window?", isPresented: $showCloseWindowAlert) {
@@ -247,9 +251,37 @@ struct ContentView: View {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(2))
             for project in projects where project.needsClaudeConfig == true {
-                if let config = await configService.readConfig(forRepo: project.repoPath) {
+                if project.isRemote {
+                    // Poll remote .wtmux/config.json over SSH
+                    let transport = project.makeTransport(connectionManager: sshConnectionManager)
+                    if let result = try? await transport.execute(
+                        "cat .wtmux/config.json 2>/dev/null",
+                        in: project.repoPath
+                    ), result.succeeded,
+                       let data = result.stdout.data(using: .utf8),
+                       let config = try? JSONDecoder().decode(ProjectConfig.self, from: data) {
+                        importService.importProject(repoPath: project.repoPath, config: config, in: modelContext)
+                    }
+                } else if let config = await configService.readConfig(forRepo: project.repoPath) {
                     importService.importProject(repoPath: project.repoPath, config: config, in: modelContext)
                 }
+            }
+        }
+    }
+
+    private func startRemotePolling() async {
+        let remoteProjects = projects.filter { $0.isRemote }
+        guard !remoteProjects.isEmpty else { return }
+
+        for project in remoteProjects {
+            let transport = project.makeTransport(connectionManager: sshConnectionManager)
+            let hostKey = "\(project.sshUser ?? "")@\(project.sshHost ?? ""):\(project.sshPort ?? 22)"
+            await sshStatusPoller.startPolling(
+                transport: transport,
+                projectKey: project.repoPath,
+                hostKey: hostKey
+            ) { [weak claudeStatusManager] status, cwd, sessionId, _ in
+                claudeStatusManager?.handleRemoteEvent(status: status, cwd: cwd, sessionId: sessionId)
             }
         }
     }
@@ -519,6 +551,12 @@ struct ContentView: View {
     // MARK: - Cmd+W / Cmd+Shift+W
 
     private func handleCmdW() {
+        // Close diff overlay first if active
+        if paneManager.activeDiffFile != nil {
+            paneManager.closeDiff()
+            return
+        }
+
         guard let pane = paneManager.focusedPane else {
             return
         }

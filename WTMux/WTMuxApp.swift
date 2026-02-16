@@ -2,9 +2,32 @@ import SwiftUI
 import SwiftData
 import WTCore
 import WTTerminal
+import WTSSH
 import os.log
 
 private let logger = Logger(subsystem: "com.wtmux", category: "App")
+
+private struct SSHConnectionManagerKey: EnvironmentKey {
+    static let defaultValue: SSHConnectionManager = SSHConnectionManager()
+}
+
+extension EnvironmentValues {
+    var sshConnectionManager: SSHConnectionManager {
+        get { self[SSHConnectionManagerKey.self] }
+        set { self[SSHConnectionManagerKey.self] = newValue }
+    }
+}
+
+private struct SSHStatusPollerKey: EnvironmentKey {
+    static let defaultValue: SSHStatusPoller = SSHStatusPoller()
+}
+
+extension EnvironmentValues {
+    var sshStatusPoller: SSHStatusPoller {
+        get { self[SSHStatusPollerKey.self] }
+        set { self[SSHStatusPollerKey.self] = newValue }
+    }
+}
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -33,6 +56,8 @@ struct WTMuxApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @State private var claudeIntegrationService = ClaudeIntegrationService()
     @State private var claudeStatusManager = ClaudeStatusManager()
+    private let sshConnectionManager = SSHConnectionManager()
+    private let sshStatusPoller = SSHStatusPoller()
 
     let modelContainer: ModelContainer
     private let initError: String?
@@ -91,6 +116,8 @@ struct WTMuxApp: App {
         .modelContainer(modelContainer)
         .environment(claudeIntegrationService)
         .environment(claudeStatusManager)
+        .environment(\.sshConnectionManager, sshConnectionManager)
+        .environment(\.sshStatusPoller, sshStatusPoller)
         .defaultSize(width: 1280, height: 800)
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified(showsTitle: true))

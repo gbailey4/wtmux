@@ -169,6 +169,10 @@ public final class TerminalSessionManager: @unchecked Sendable {
 
         session.terminalView?.terminate()
         session.terminalView = nil
+        session.sshTerminalView?.terminate()
+        session.sshTerminalView = nil
+        session.shellSession?.close()
+        session.shellSession = nil
         sessions.removeValue(forKey: sessionId)
         tabOrder[key]?.removeAll { $0 == sessionId }
 
@@ -186,6 +190,10 @@ public final class TerminalSessionManager: @unchecked Sendable {
     public func removeSession(id: String) {
         sessions[id]?.terminalView?.terminate()
         sessions[id]?.terminalView = nil
+        sessions[id]?.sshTerminalView?.terminate()
+        sessions[id]?.sshTerminalView = nil
+        sessions[id]?.shellSession?.close()
+        sessions[id]?.shellSession = nil
         sessions.removeValue(forKey: id)
     }
 
@@ -233,6 +241,8 @@ public final class TerminalSessionManager: @unchecked Sendable {
         for session in sessions.values {
             if SessionID.isRunner(session.id) {
                 if session.state == .running { return true }
+            } else if session.isSSH {
+                if session.sshTerminalView?.isSessionActive == true { return true }
             } else {
                 if session.terminalView?.hasChildProcesses() == true { return true }
             }
@@ -245,6 +255,10 @@ public final class TerminalSessionManager: @unchecked Sendable {
         for session in sessions.values {
             session.terminalView?.terminate()
             session.terminalView = nil
+            session.sshTerminalView?.terminate()
+            session.sshTerminalView = nil
+            session.shellSession?.close()
+            session.shellSession = nil
         }
         sessions.removeAll()
         activeSessionId.removeAll()
@@ -290,13 +304,22 @@ public final class TerminalSessionManager: @unchecked Sendable {
     public func startSession(id: String) {
         guard let session = sessions[id],
               session.deferExecution,
-              let view = session.terminalView,
               let command = session.initialCommand else { return }
-        session.deferExecution = false
-        session.state = .running
-        view.sendCommand(command)
-        runnerStateVersion += 1
-        startPortScanning()
+
+        if session.isSSH {
+            guard session.sshTerminalView != nil else { return }
+            session.deferExecution = false
+            session.state = .running
+            session.shellSession?.send(text: command + "\n")
+            runnerStateVersion += 1
+        } else {
+            guard let view = session.terminalView else { return }
+            session.deferExecution = false
+            session.state = .running
+            view.sendCommand(command)
+            runnerStateVersion += 1
+            startPortScanning()
+        }
     }
 
     public func runnerSessions(forWorktree worktreeId: String) -> [TerminalSession] {
@@ -325,6 +348,10 @@ public final class TerminalSessionManager: @unchecked Sendable {
             session.listeningPorts = []
             session.terminalView?.terminate()
             session.terminalView = nil
+            session.sshTerminalView?.terminate()
+            session.sshTerminalView = nil
+            session.shellSession?.close()
+            session.shellSession = nil
             sessions.removeValue(forKey: session.id)
         }
         activeRunnerSessionId.removeValue(forKey: worktreeId)
@@ -373,6 +400,10 @@ public final class TerminalSessionManager: @unchecked Sendable {
         for session in toRemove {
             session.terminalView?.terminate()
             session.terminalView = nil
+            session.sshTerminalView?.terminate()
+            session.sshTerminalView = nil
+            session.shellSession?.close()
+            session.shellSession = nil
             sessions.removeValue(forKey: session.id)
         }
         // If the active runner was a setup session, clear it so a remaining runner can be selected
@@ -394,23 +425,35 @@ public final class TerminalSessionManager: @unchecked Sendable {
     /// Sends Ctrl+C then re-sends the initial command after a short delay.
     public func restartSession(id: String) {
         guard let session = sessions[id],
-              let view = session.terminalView,
               let command = session.initialCommand else { return }
-        // Send Ctrl+C
-        view.send([0x03])
-        session.isProcessRunning = true
-        runnerStateVersion += 1
-        // Re-send command after brief delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            view.sendCommand(command)
+
+        if session.isSSH {
+            // Send Ctrl+C via SSH
+            session.shellSession?.send(Data([0x03]))
+            session.isProcessRunning = true
+            runnerStateVersion += 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                session.shellSession?.send(text: command + "\n")
+            }
+        } else {
+            guard let view = session.terminalView else { return }
+            view.send([0x03])
+            session.isProcessRunning = true
+            runnerStateVersion += 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                view.sendCommand(command)
+            }
         }
     }
 
     /// Sends Ctrl+C to a runner session to stop it.
     public func stopSession(id: String) {
-        guard let session = sessions[id],
-              let view = session.terminalView else { return }
-        view.send([0x03])
+        guard let session = sessions[id] else { return }
+        if session.isSSH {
+            session.shellSession?.send(Data([0x03]))
+        } else {
+            session.terminalView?.send([0x03])
+        }
         session.isProcessRunning = false
         session.listeningPorts = []
         runnerStateVersion += 1
@@ -444,6 +487,8 @@ public final class TerminalSessionManager: @unchecked Sendable {
     private func scanRunnerPorts() {
         var changed = false
         for session in sessions.values where SessionID.isRunner(session.id) && session.state == .running {
+            // Skip port scanning for SSH sessions — no local PID to inspect
+            guard !session.isSSH else { continue }
             guard let pid = session.terminalView?.process?.shellPid, pid > 0 else { continue }
             let ports = PortScanner.listeningPorts(forProcessTree: pid)
             if ports != session.listeningPorts {

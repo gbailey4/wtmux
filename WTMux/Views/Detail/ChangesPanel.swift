@@ -3,6 +3,7 @@ import WTCore
 import WTGit
 import WTDiff
 import WTTransport
+import WTSSH
 struct SelectedFile: Equatable {
     let groupId: String
     let path: String
@@ -43,8 +44,11 @@ enum DiffViewMode: Hashable {
 
 struct ChangesPanel: View {
     let worktree: Worktree
-    @Binding var activeDiffFile: DiffFile?
+    let paneManager: SplitPaneManager
+    let paneID: UUID
     @Binding var changedFileCount: Int
+
+    @Environment(\.sshConnectionManager) private var sshConnectionManager
 
     @State private var diffViewMode: DiffViewMode = .byCommit
     @State private var changeGroups: [ChangeGroup] = []
@@ -55,7 +59,8 @@ struct ChangesPanel: View {
     @State private var commitFileCache: [String: [GitFileStatus]] = [:]
 
     private var git: GitService {
-        GitService(transport: LocalTransport(), repoPath: worktree.path)
+        let transport: CommandTransport = worktree.project.map { $0.makeTransport(connectionManager: sshConnectionManager) } ?? LocalTransport()
+        return GitService(transport: transport, repoPath: worktree.path)
     }
 
     var body: some View {
@@ -79,7 +84,7 @@ struct ChangesPanel: View {
         .task(id: "\(worktree.path)-\(diffViewMode)") {
             await loadAllChanges()
         }
-        .onChange(of: activeDiffFile?.id) { _, newValue in
+        .onChange(of: paneManager.activeDiffFile?.id) { _, newValue in
             if newValue == nil {
                 selectedFile = nil
             }
@@ -137,7 +142,7 @@ struct ChangesPanel: View {
                        let file = diffFiles.first(where: {
                            $0.displayPath == path || $0.id == path || $0.oldPath == path || $0.newPath == path
                        }) {
-                        activeDiffFile = file
+                        paneManager.showDiff(file: file, worktreePath: worktree.path, fromPane: paneID)
                     }
                 }
             }
@@ -419,7 +424,7 @@ struct ChangesPanel: View {
         diffCache = [:]
         commitFileCache = [:]
         selectedFile = nil
-        activeDiffFile = nil
+        paneManager.closeDiff()
         await loadAllChanges()
     }
 

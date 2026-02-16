@@ -5,6 +5,7 @@ import WTCore
 import WTGit
 import WTTerminal
 import WTTransport
+import WTSSH
 import os.log
 
 private let logger = Logger(subsystem: "com.wtmux", category: "SidebarView")
@@ -42,6 +43,7 @@ struct SidebarView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
+    @Environment(\.sshConnectionManager) private var sshConnectionManager
     @State private var worktreeTargetProject: Project?
     @State private var editingProject: Project?
     @State private var worktreeToDelete: Worktree?
@@ -58,6 +60,9 @@ struct SidebarView: View {
     @State private var conflictingPorts: [Int] = []
     @State private var worktreeToStartRunners: Worktree?
     @State private var projectDropTargetRepoPath: String?
+    @State private var showRemoteSetupSheet = false
+    @State private var remoteSetupTransport: CommandTransport?
+    @State private var remoteSetupPendingAction: (() -> Void)?
 
     private var runningWorktreeIds: Set<String> {
         // Read runnerStateVersion to trigger re-evaluation when runners stop/restart
@@ -149,17 +154,32 @@ struct SidebarView: View {
                     .contextMenu {
                         if let firstWorktree = project.worktrees.sorted(by: { $0.sortOrder < $1.sortOrder }).first {
                             Button {
-                                ClaudeConfigHelper.openConfigTerminal(
-                                    terminalSessionManager: terminalSessionManager,
-                                    worktreeId: firstWorktree.path,
-                                    workingDirectory: firstWorktree.path,
-                                    repoPath: project.repoPath
-                                )
-                                selectedWorktreeID.wrappedValue = firstWorktree.path
+                                if project.isRemote {
+                                    let transport = project.makeTransport(connectionManager: sshConnectionManager)
+                                    remoteSetupTransport = transport
+                                    remoteSetupPendingAction = {
+                                        ClaudeConfigHelper.openConfigTerminal(
+                                            terminalSessionManager: terminalSessionManager,
+                                            worktreeId: firstWorktree.path,
+                                            workingDirectory: firstWorktree.path,
+                                            repoPath: project.repoPath
+                                        )
+                                        selectedWorktreeID.wrappedValue = firstWorktree.path
+                                    }
+                                    showRemoteSetupSheet = true
+                                } else {
+                                    ClaudeConfigHelper.openConfigTerminal(
+                                        terminalSessionManager: terminalSessionManager,
+                                        worktreeId: firstWorktree.path,
+                                        workingDirectory: firstWorktree.path,
+                                        repoPath: project.repoPath
+                                    )
+                                    selectedWorktreeID.wrappedValue = firstWorktree.path
+                                }
                             } label: {
                                 Label("Configure with Claude", systemImage: "terminal")
                             }
-                            .disabled(!claudeIntegrationService.canUseClaudeConfig)
+                            .disabled(!project.isRemote && !claudeIntegrationService.canUseClaudeConfig)
                         }
                         Button("Project Settings...") {
                             editingProject = project
@@ -254,6 +274,24 @@ struct SidebarView: View {
             Button("OK") { projectDeleteError = nil }
         } message: {
             Text(projectDeleteError ?? "An unknown error occurred.")
+        }
+        .sheet(isPresented: $showRemoteSetupSheet) {
+            if let transport = remoteSetupTransport {
+                RemoteSetupSheet(
+                    transport: transport,
+                    onComplete: {
+                        showRemoteSetupSheet = false
+                        remoteSetupPendingAction?()
+                        remoteSetupPendingAction = nil
+                        remoteSetupTransport = nil
+                    },
+                    onCancel: {
+                        showRemoteSetupSheet = false
+                        remoteSetupPendingAction = nil
+                        remoteSetupTransport = nil
+                    }
+                )
+            }
         }
         .alert("Runners Already Active", isPresented: $showRunnerConflictAlert) {
             Button("Stop & Switch") {
@@ -445,6 +483,12 @@ struct SidebarView: View {
             session.onProcessExit = { [weak terminalSessionManager] sessionId, exitCode in
                 terminalSessionManager?.handleProcessExit(sessionId: sessionId, exitCode: exitCode)
             }
+            // Configure SSH if remote project
+            if let project = worktree.project, project.isRemote, let sshConfig = project.sshConfig() {
+                session.isSSH = true
+                session.sshConnectionManager = sshConnectionManager
+                session.sshConnectionConfig = sshConfig
+            }
         }
         // Defer startSession to next run loop so terminal views have time to render
         Task { @MainActor in
@@ -481,7 +525,8 @@ struct SidebarView: View {
 
         // 3. Call git worktree remove
         if let repoPath {
-            let git = GitService(transport: LocalTransport(), repoPath: repoPath)
+            let transport: CommandTransport = worktree.project.map { $0.makeTransport(connectionManager: sshConnectionManager) } ?? LocalTransport()
+            let git = GitService(transport: transport, repoPath: repoPath)
             do {
                 try await git.worktreeRemove(path: worktree.path)
             } catch {
@@ -543,7 +588,8 @@ struct SidebarView: View {
     private func deleteProjectWithWorktrees(_ project: Project, deleteBranches: Bool) async {
         var errors: [String] = []
         let repoPath = project.repoPath
-        let git = GitService(transport: LocalTransport(), repoPath: repoPath)
+        let transport = project.makeTransport(connectionManager: sshConnectionManager)
+        let git = GitService(transport: transport, repoPath: repoPath)
         let worktrees = project.worktrees
 
         for worktree in worktrees {

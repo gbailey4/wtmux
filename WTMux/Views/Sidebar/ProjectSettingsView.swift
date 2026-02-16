@@ -3,6 +3,7 @@ import SwiftUI
 import WTCore
 import WTTerminal
 import WTTransport
+import WTSSH
 import os.log
 
 private let logger = Logger(subsystem: "com.wtmux", category: "ProjectSettingsView")
@@ -12,6 +13,7 @@ struct ProjectSettingsView: View {
     let terminalSessionManager: TerminalSessionManager
     @Environment(\.dismiss) private var dismiss
     @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
+    @Environment(\.sshConnectionManager) private var sshConnectionManager
 
     @State private var name: String
     @State private var repoPath: String
@@ -21,6 +23,8 @@ struct ProjectSettingsView: View {
     @State private var sshHost: String
     @State private var sshUser: String
     @State private var sshPort: String
+    @State private var sshKeyPath: String
+    @State private var browsingRemotePath: RemoteBrowseTarget?
 
     // Appearance
     @State private var selectedColor: String
@@ -45,6 +49,7 @@ struct ProjectSettingsView: View {
         _sshHost = State(initialValue: project.sshHost ?? "")
         _sshUser = State(initialValue: project.sshUser ?? "")
         _sshPort = State(initialValue: project.sshPort.map(String.init) ?? "22")
+        _sshKeyPath = State(initialValue: project.sshKeyPath ?? "")
 
         // Appearance
         _selectedColor = State(initialValue: project.colorName ?? Project.colorPalette[0])
@@ -138,7 +143,11 @@ struct ProjectSettingsView: View {
                             TextField("", text: $repoPath)
                                 .textFieldStyle(.roundedBorder)
                             Button("Browse...") {
-                                browseRepoPath()
+                                if isRemote {
+                                    browsingRemotePath = .repoPath
+                                } else {
+                                    browseRepoPath()
+                                }
                             }
                         }
                     }
@@ -157,7 +166,11 @@ struct ProjectSettingsView: View {
                             TextField("", text: $worktreeBasePath)
                                 .textFieldStyle(.roundedBorder)
                             Button("Browse...") {
-                                browseWorktreeBasePath()
+                                if isRemote {
+                                    browsingRemotePath = .worktreeBasePath
+                                } else {
+                                    browseWorktreeBasePath()
+                                }
                             }
                         }
                     }
@@ -189,6 +202,20 @@ struct ProjectSettingsView: View {
                                 .foregroundStyle(.secondary)
                             TextField("", text: $sshPort)
                                 .textFieldStyle(.roundedBorder)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("SSH Key Path")
+                                .foregroundStyle(.secondary)
+                            HStack {
+                                TextField("", text: $sshKeyPath)
+                                    .textFieldStyle(.roundedBorder)
+                                Button("Browse...") {
+                                    browseForKeyFile()
+                                }
+                            }
+                            Text("Leave blank to auto-detect from ~/.ssh/")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -328,6 +355,24 @@ struct ProjectSettingsView: View {
             .padding()
         }
         .frame(width: 550, height: 600)
+        .sheet(item: $browsingRemotePath) { target in
+            RemoteDirectoryBrowser(
+                transport: makeTransport(),
+                title: target.title,
+                onSelect: { path in
+                    switch target {
+                    case .repoPath:
+                        repoPath = path
+                    case .worktreeBasePath:
+                        worktreeBasePath = path
+                    }
+                    browsingRemotePath = nil
+                },
+                onCancel: {
+                    browsingRemotePath = nil
+                }
+            )
+        }
     }
 
     private func browseRepoPath() {
@@ -360,6 +405,34 @@ struct ProjectSettingsView: View {
             existing: envFilesToCopy
         )
         envFilesToCopy = detected
+    }
+
+    private func browseForKeyFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.message = "Select an SSH private key file"
+        panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".ssh")
+
+        if panel.runModal() == .OK, let url = panel.url {
+            sshKeyPath = url.path
+        }
+    }
+
+    /// Builds a transport from the current form state (SSH or local).
+    private func makeTransport() -> CommandTransport {
+        if isRemote, !sshHost.isEmpty, !sshUser.isEmpty {
+            let config = SSHConnectionConfig(
+                host: sshHost,
+                port: Int(sshPort) ?? 22,
+                username: sshUser,
+                keyPath: sshKeyPath.isEmpty ? nil : sshKeyPath
+            )
+            return SSHTransport(connectionManager: sshConnectionManager, config: config)
+        }
+        return LocalTransport()
     }
 
     @ViewBuilder
@@ -428,10 +501,12 @@ struct ProjectSettingsView: View {
             project.sshHost = sshHost.isEmpty ? nil : sshHost
             project.sshUser = sshUser.isEmpty ? nil : sshUser
             project.sshPort = Int(sshPort) ?? 22
+            project.sshKeyPath = sshKeyPath.isEmpty ? nil : sshKeyPath
         } else {
             project.sshHost = nil
             project.sshUser = nil
             project.sshPort = nil
+            project.sshKeyPath = nil
         }
 
         // Ensure profile exists

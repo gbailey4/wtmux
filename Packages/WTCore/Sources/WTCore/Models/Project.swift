@@ -12,6 +12,7 @@ public final class Project {
     public var sshHost: String?
     public var sshUser: String?
     public var sshPort: Int?
+    public var sshKeyPath: String?
     public var remoteRepoPath: String?
     public var remoteWorktreeBasePath: String?
 

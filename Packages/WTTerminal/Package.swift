@@ -10,11 +10,12 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.10.0"),
+        .package(path: "../WTSSH"),
     ],
     targets: [
         .target(
             name: "WTTerminal",
-            dependencies: ["SwiftTerm"]
+            dependencies: ["SwiftTerm", "WTSSH"]
         ),
         .testTarget(name: "WTTerminalTests", dependencies: ["WTTerminal"]),
     ]

@@ -1,4 +1,5 @@
 import Foundation
+import WTDiff
 import WTTerminal
 
 @MainActor @Observable
@@ -10,6 +11,23 @@ final class SplitPaneManager {
     }
     var focusedWindowID: UUID?
     var focusedPaneID: UUID?
+
+    // MARK: - Diff State (window-level)
+    var activeDiffFile: DiffFile?
+    var activeDiffWorktreePath: String?
+    var activeDiffPaneID: UUID?
+
+    func showDiff(file: DiffFile, worktreePath: String, fromPane paneID: UUID) {
+        activeDiffFile = file
+        activeDiffWorktreePath = worktreePath
+        activeDiffPaneID = paneID
+    }
+
+    func closeDiff() {
+        activeDiffFile = nil
+        activeDiffWorktreePath = nil
+        activeDiffPaneID = nil
+    }
 
     var focusedWindow: WindowState? {
         guard let id = focusedWindowID else { return windows.first }
@@ -285,6 +303,11 @@ final class SplitPaneManager {
               let colIndex = window.columns.firstIndex(where: { $0.panes.contains { $0.id == id } }),
               let paneIndex = window.columns[colIndex].panes.firstIndex(where: { $0.id == id }) else { return }
 
+        // Close diff if it belongs to this pane
+        if activeDiffPaneID == id {
+            closeDiff()
+        }
+
         let column = window.columns[colIndex]
 
         if column.panes.count == 1 {
@@ -364,6 +387,11 @@ final class SplitPaneManager {
     /// Clears a worktree from all columns that display it (across all windows).
     /// Windows left with no columns are removed entirely.
     func clearWorktree(_ worktreeID: String) {
+        // Close diff if it belongs to this worktree
+        if activeDiffWorktreePath == worktreeID {
+            closeDiff()
+        }
+
         for window in windows {
             for column in window.columns where column.worktreeID == worktreeID {
                 for pane in column.panes {
@@ -403,6 +431,13 @@ final class SplitPaneManager {
     func removeWindow(id: UUID) {
         guard let index = windows.firstIndex(where: { $0.id == id }) else { return }
         let window = windows[index]
+
+        // Close diff if it belongs to a pane in this window
+        if let diffPaneID = activeDiffPaneID,
+           window.columns.flatMap(\.panes).contains(where: { $0.id == diffPaneID }) {
+            closeDiff()
+        }
+
         for column in window.columns {
             for pane in column.panes {
                 terminalSessionManager?.terminateSessionsForPane(pane.id.uuidString)

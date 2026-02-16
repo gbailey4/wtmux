@@ -1,5 +1,6 @@
 import Foundation
 import SwiftTerm
+import WTSSH
 
 public enum SessionState: Sendable {
     case idle
@@ -84,6 +85,21 @@ public final class TerminalSession: Identifiable {
     public var paneId: String?
 
     public var terminalView: DeferredStartTerminalView?
+
+    /// SSH terminal view (used instead of `terminalView` for remote projects).
+    public var sshTerminalView: SSHTerminalView?
+
+    /// Whether this is an SSH session.
+    public var isSSH: Bool = false
+
+    /// SSH connection manager (set for SSH sessions).
+    public var sshConnectionManager: SSHConnectionManager?
+
+    /// SSH connection config (set for SSH sessions).
+    public var sshConnectionConfig: SSHConnectionConfig?
+
+    /// SSH shell session for sending commands (set after connection).
+    public var shellSession: SSHShellSession?
 
     public init(
         id: String,

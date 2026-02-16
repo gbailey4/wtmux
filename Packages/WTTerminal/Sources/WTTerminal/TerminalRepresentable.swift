@@ -187,6 +187,59 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
         return count > 0
     }
 
+    // MARK: - Fork safety
+
+    /// Pre-warm Swift runtime's protocol conformance cache with the same
+    /// generic instantiations that SwiftTerm's withArrayOfCStrings uses.
+    /// After fork(), the child process inherits the parent's memory including
+    /// any in-progress lock state from background threads. If the conformance
+    /// cache is already populated, the child won't need to acquire the lock.
+    private static let _warmMetadataCache: Void = {
+        let strings = [""]
+        let counts = Array(strings.map { $0.utf8.count + 1 })
+        var offsets = [0]
+        var running = 0
+        for c in counts {
+            running += c
+            offsets.append(running)
+        }
+        let bufferSize = offsets.last!
+        var buffer: [UInt8] = []
+        buffer.reserveCapacity(bufferSize)
+        for s in strings {
+            buffer.append(contentsOf: s.utf8)
+            buffer.append(0)
+        }
+        buffer.withUnsafeMutableBufferPointer { bp in
+            let ptr = UnsafeMutableRawPointer(bp.baseAddress!).bindMemory(
+                to: CChar.self, capacity: bp.count)
+            var cStrings: [UnsafeMutablePointer<CChar>?] = offsets.map { ptr + $0 }
+            cStrings[cStrings.count - 1] = nil
+            _ = cStrings.count
+        }
+    }()
+
+    /// Serialize forkpty() calls so only one happens at a time, with a small
+    /// delay between forks to let background metadata operations settle.
+    private static var startQueue: [() -> Void] = []
+    private static var isStartingProcess = false
+
+    private static func enqueueStart(_ work: @escaping () -> Void) {
+        startQueue.append(work)
+        drainStartQueue()
+    }
+
+    private static func drainStartQueue() {
+        guard !isStartingProcess, !startQueue.isEmpty else { return }
+        isStartingProcess = true
+        let next = startQueue.removeFirst()
+        next()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            isStartingProcess = false
+            drainStartQueue()
+        }
+    }
+
     // MARK: - Process lifecycle
 
     public override func processTerminated(_ source: SwiftTerm.LocalProcess, exitCode: Int32?) {
@@ -197,7 +250,13 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
     private func startProcessIfNeeded() {
         guard !processStarted else { return }
         processStarted = true
+        _ = Self._warmMetadataCache
+        Self.enqueueStart { [weak self] in
+            self?.doStartProcess()
+        }
+    }
 
+    private func doStartProcess() {
         var env = ProcessInfo.processInfo.environment
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"

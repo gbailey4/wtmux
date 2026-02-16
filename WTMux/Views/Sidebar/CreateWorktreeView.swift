@@ -3,6 +3,7 @@ import SwiftData
 import WTCore
 import WTGit
 import WTTransport
+import WTSSH
 import os.log
 
 private let logger = Logger(subsystem: "com.wtmux", category: "CreateWorktreeView")
@@ -12,6 +13,7 @@ struct CreateWorktreeView: View {
     let paneManager: SplitPaneManager
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.sshConnectionManager) private var sshConnectionManager
 
     @State private var branchName = ""
     @State private var baseBranch = ""
@@ -63,7 +65,7 @@ struct CreateWorktreeView: View {
     }
 
     private func loadBranches() async {
-        let transport = LocalTransport()
+        let transport = project.makeTransport(connectionManager: sshConnectionManager)
         let git = GitService(transport: transport, repoPath: project.repoPath)
         do {
             availableBranches = try await git.branches()
@@ -81,7 +83,7 @@ struct CreateWorktreeView: View {
         errorMessage = nil
 
         Task {
-            let transport = LocalTransport()
+            let transport = project.makeTransport(connectionManager: sshConnectionManager)
             let git = GitService(transport: transport, repoPath: project.repoPath)
 
             let worktreePath = "\(project.worktreeBasePath)/\(branchName)"

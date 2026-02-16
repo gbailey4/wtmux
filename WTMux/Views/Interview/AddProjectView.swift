@@ -5,6 +5,7 @@ import WTCore
 import WTGit
 import WTTerminal
 import WTTransport
+import WTSSH
 import os.log
 
 private let logger = Logger(subsystem: "com.wtmux", category: "AddProjectView")
@@ -16,6 +17,7 @@ struct AddProjectView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
+    @Environment(\.sshConnectionManager) private var sshConnectionManager
 
     @State private var step: InterviewStep = .selectRepo
     @State private var repoPath = ""
@@ -26,6 +28,7 @@ struct AddProjectView: View {
     @State private var sshHost = ""
     @State private var sshUser = ""
     @State private var sshPort = "22"
+    @State private var sshKeyPath = ""
 
     // Profile
     @State private var detectedEnvFiles: [String] = []
@@ -44,11 +47,17 @@ struct AddProjectView: View {
 
     @State private var errorMessage: String?
     @State private var isLoading = false
+    @State private var isTestingConnection = false
+    @State private var connectionTestResult: String?
+    @State private var connectionTestSuccess = false
 
     // Configure with Claude
     @State private var showFirstWorktreeAlert = false
     @State private var firstWorktreeBranch = ""
     @State private var claudeEnableError: String?
+    @State private var showRemoteSetupSheet = false
+    @State private var remoteSetupPendingAction: (() -> Void)?
+    @State private var browsingRemotePath: RemoteBrowseTarget?
 
     enum InterviewStep: CaseIterable {
         case selectRepo
@@ -119,11 +128,19 @@ struct AddProjectView: View {
                                 if worktreeBasePath.isEmpty {
                                     worktreeBasePath = "\(repoPath)-worktrees"
                                 }
-                                firstWorktreeBranch = ""
-                                showFirstWorktreeAlert = true
+                                if isRemote {
+                                    remoteSetupPendingAction = {
+                                        firstWorktreeBranch = ""
+                                        showFirstWorktreeAlert = true
+                                    }
+                                    showRemoteSetupSheet = true
+                                } else {
+                                    firstWorktreeBranch = ""
+                                    showFirstWorktreeAlert = true
+                                }
                             }
                             .keyboardShortcut(.defaultAction)
-                            .disabled(!canAdvance || !claudeIntegrationService.canUseClaudeConfig)
+                            .disabled(!canAdvance || (!isRemote && !claudeIntegrationService.canUseClaudeConfig))
                             if !claudeIntegrationService.mcpRegistered {
                                 HStack(spacing: 4) {
                                     Text("Claude Code integration not enabled.")
@@ -167,17 +184,107 @@ struct AddProjectView: View {
         } message: {
             Text("Enter a branch name for your first worktree. Claude will auto-configure the project in the terminal.")
         }
+        .sheet(isPresented: $showRemoteSetupSheet) {
+            RemoteSetupSheet(
+                transport: makeTransport(),
+                onComplete: {
+                    showRemoteSetupSheet = false
+                    remoteSetupPendingAction?()
+                    remoteSetupPendingAction = nil
+                },
+                onCancel: {
+                    showRemoteSetupSheet = false
+                    remoteSetupPendingAction = nil
+                }
+            )
+        }
+        .sheet(item: $browsingRemotePath) { target in
+            RemoteDirectoryBrowser(
+                transport: makeTransport(),
+                title: target.title,
+                onSelect: { path in
+                    switch target {
+                    case .repoPath:
+                        repoPath = path
+                        if projectName.isEmpty {
+                            projectName = URL(fileURLWithPath: path).lastPathComponent
+                        }
+                    case .worktreeBasePath:
+                        worktreeBasePath = path
+                    }
+                    browsingRemotePath = nil
+                },
+                onCancel: {
+                    browsingRemotePath = nil
+                }
+            )
+        }
         .frame(width: 600, height: 500)
+    }
+
+    private var branchLoadTrigger: String {
+        if isRemote {
+            return "\(repoPath)|\(sshHost)|\(sshUser)|\(sshPort)|\(sshKeyPath)"
+        }
+        return repoPath
     }
 
     @ViewBuilder
     private var selectRepoStep: some View {
         Form {
-            Section("Repository") {
+            Section("Connection") {
+                Toggle("Remote (SSH)", isOn: $isRemote)
+
+                if isRemote {
+                    TextField("SSH Host", text: $sshHost)
+                    TextField("SSH User", text: $sshUser)
+                    TextField("SSH Port", text: $sshPort)
+                    HStack {
+                        TextField("SSH Key Path", text: $sshKeyPath)
+                        Button("Browse...") {
+                            browseForKeyFile()
+                        }
+                        .fixedSize()
+                    }
+                    Text("Leave blank to auto-detect from ~/.ssh/")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 8) {
+                        Button("Test Connection") {
+                            testSSHConnection()
+                        }
+                        .disabled(sshHost.isEmpty || sshUser.isEmpty || isTestingConnection)
+
+                        if isTestingConnection {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+
+                        if let connectionTestResult {
+                            Image(systemName: connectionTestSuccess ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundStyle(connectionTestSuccess ? .green : .red)
+                            Text(connectionTestResult)
+                                .font(.caption)
+                                .foregroundStyle(connectionTestSuccess ? Color.secondary : Color.red)
+                        }
+                    }
+                }
+            }
+
+            Section(isRemote ? "Remote Repository" : "Repository") {
                 HStack {
-                    TextField("Repository Path", text: $repoPath)
+                    TextField(
+                        isRemote ? "Remote Repository Path" : "Repository Path",
+                        text: $repoPath,
+                        prompt: isRemote ? Text("/home/user/my-project") : nil
+                    )
                     Button("Browse...") {
-                        selectFolder()
+                        if isRemote {
+                            browsingRemotePath = .repoPath
+                        } else {
+                            selectFolder()
+                        }
                     }
                     .fixedSize()
                 }
@@ -189,8 +296,10 @@ struct AddProjectView: View {
                         Text(repoError)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Button("Initialize Repository") {
-                            initializeRepo()
+                        if !isRemote {
+                            Button("Initialize Repository") {
+                                initializeRepo()
+                            }
                         }
                     }
                     .font(.caption)
@@ -209,9 +318,17 @@ struct AddProjectView: View {
                 .disabled(availableBranches.isEmpty)
 
                 HStack {
-                    TextField("Worktree Base Path", text: $worktreeBasePath)
+                    TextField(
+                        isRemote ? "Remote Worktree Base Path" : "Worktree Base Path",
+                        text: $worktreeBasePath,
+                        prompt: isRemote ? Text("/home/user/my-project-worktrees") : nil
+                    )
                     Button("Browse...") {
-                        browseWorktreeBasePath()
+                        if isRemote {
+                            browsingRemotePath = .worktreeBasePath
+                        } else {
+                            browseWorktreeBasePath()
+                        }
                     }
                     .fixedSize()
                 }
@@ -221,21 +338,10 @@ struct AddProjectView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-
-            Section("Connection") {
-                Toggle("Remote (SSH)", isOn: $isRemote)
-
-                if isRemote {
-                    TextField("SSH Host", text: $sshHost)
-                    TextField("SSH User", text: $sshUser)
-                    TextField("SSH Port", text: $sshPort)
-                }
-            }
-
         }
         .formStyle(.grouped)
         .padding()
-        .task(id: repoPath) {
+        .task(id: branchLoadTrigger) {
             await loadBranches()
         }
     }
@@ -279,10 +385,12 @@ struct AddProjectView: View {
                     Text("No .env files detected")
                         .foregroundStyle(.secondary)
                 }
-                Button {
-                    browseForEnvFiles()
-                } label: {
-                    Label("Browse...", systemImage: "folder")
+                if !isRemote {
+                    Button {
+                        browseForEnvFiles()
+                    } label: {
+                        Label("Browse...", systemImage: "folder")
+                    }
                 }
             }
 
@@ -359,6 +467,9 @@ struct AddProjectView: View {
                 LabeledContent("Path", value: repoPath)
                 LabeledContent("Default Branch", value: defaultBranch)
                 LabeledContent("Worktrees", value: worktreeBasePath)
+                if isRemote {
+                    LabeledContent("SSH", value: "\(sshUser)@\(sshHost):\(sshPort)")
+                }
             }
 
             if !selectedWorktreePaths.isEmpty {
@@ -418,7 +529,11 @@ struct AddProjectView: View {
     private var canAdvance: Bool {
         switch step {
         case .selectRepo:
-            return !repoPath.isEmpty && !projectName.isEmpty && repoError == nil
+            let baseValid = !repoPath.isEmpty && !projectName.isEmpty && repoError == nil
+            if isRemote {
+                return baseValid && !sshHost.isEmpty && !sshUser.isEmpty
+            }
+            return baseValid
         case .configureProfile:
             return true
         case .review:
@@ -432,7 +547,13 @@ struct AddProjectView: View {
             if worktreeBasePath.isEmpty {
                 worktreeBasePath = "\(repoPath)-worktrees"
             }
-            Task { await detectProjectConfig() }
+            Task {
+                if isRemote {
+                    await detectRemoteProjectConfig()
+                } else {
+                    await detectProjectConfig()
+                }
+            }
             step = .configureProfile
         case .configureProfile:
             step = .review
@@ -466,13 +587,21 @@ struct AddProjectView: View {
 
     private func loadBranches() async {
         let path = repoPath.trimmingCharacters(in: .whitespaces)
-        guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else {
-            availableBranches = []
-            repoError = nil
-            return
+        if isRemote {
+            guard !path.isEmpty, !sshHost.isEmpty, !sshUser.isEmpty else {
+                availableBranches = []
+                repoError = nil
+                return
+            }
+        } else {
+            guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else {
+                availableBranches = []
+                repoError = nil
+                return
+            }
         }
 
-        let transport = LocalTransport()
+        let transport = makeTransport()
         let git = GitService(transport: transport, repoPath: path)
         do {
             let branches = try await git.branches()
@@ -501,7 +630,7 @@ struct AddProjectView: View {
         guard !path.isEmpty else { return }
 
         Task {
-            let transport = LocalTransport()
+            let transport = makeTransport()
             do {
                 let result = try await transport.execute(
                     [GitService.resolveGitPath(), "init"],
@@ -522,7 +651,7 @@ struct AddProjectView: View {
         isLoading = true
         defer { isLoading = false }
 
-        let transport = LocalTransport()
+        let transport = makeTransport()
 
         let git = GitService(transport: transport, repoPath: repoPath)
 
@@ -583,6 +712,123 @@ struct AddProjectView: View {
         }
     }
 
+    private func detectRemoteProjectConfig() async {
+        isLoading = true
+        defer { isLoading = false }
+
+        let transport = makeTransport()
+        let git = GitService(transport: transport, repoPath: repoPath)
+
+        // Detect default branch
+        if availableBranches.isEmpty, let branch = try? await git.defaultBranch() {
+            defaultBranch = branch
+        }
+
+        // Detect existing worktrees
+        if let worktrees = try? await git.worktreeList() {
+            let filtered = worktrees.filter { !$0.isBare && $0.path != repoPath }
+            detectedWorktrees = filtered
+            selectedWorktreePaths = Set(filtered.map(\.path))
+        }
+
+        // Detect env files over SSH
+        if let result = try? await transport.execute(
+            "find . -maxdepth 3 \\( -name '.env*' -o -name '*.env' \\) -not -path '*/node_modules/*' -not -path '*/.git/*'",
+            in: repoPath
+        ), result.succeeded {
+            let files = result.stdout
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+                .map { $0.hasPrefix("./") ? String($0.dropFirst(2)) : $0 }
+                .sorted()
+            detectedEnvFiles = files
+            selectedEnvFiles = Set(files)
+        }
+
+        // Detect package.json scripts
+        if let result = try? await transport.execute("cat package.json 2>/dev/null", in: repoPath),
+           result.succeeded,
+           let data = result.stdout.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let scripts = json["scripts"] as? [String: String] {
+
+            // Detect package manager via lock files
+            let lockResult = try? await transport.execute(
+                "ls -1 bun.lockb pnpm-lock.yaml yarn.lock package-lock.json 2>/dev/null",
+                in: repoPath
+            )
+            let lockFiles = (lockResult?.stdout ?? "")
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+
+            let packageManager: String
+            if lockFiles.contains("bun.lockb") {
+                packageManager = "bun"
+            } else if lockFiles.contains("pnpm-lock.yaml") {
+                packageManager = "pnpm"
+            } else if lockFiles.contains("yarn.lock") {
+                packageManager = "yarn"
+            } else {
+                packageManager = "npm"
+            }
+
+            setupCommands = ["\(packageManager) install"]
+
+            let devScripts = ["dev", "start", "serve"]
+            for script in devScripts {
+                if let cmd = scripts[script] {
+                    runConfigurations.append(EditableRunConfig(
+                        name: script.capitalized,
+                        command: "\(packageManager) run \(script)",
+                        portString: extractPort(from: cmd) ?? "",
+                        autoStart: script == "dev"
+                    ))
+                }
+            }
+        }
+
+        // Detect Python projects
+        if let result = try? await transport.execute(
+            "ls -1 requirements.txt pyproject.toml 2>/dev/null",
+            in: repoPath
+        ) {
+            let files = result.stdout
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            if files.contains("requirements.txt") {
+                setupCommands = ["pip install -r requirements.txt"]
+            } else if files.contains("pyproject.toml") {
+                setupCommands = ["pip install -e ."]
+            }
+        }
+    }
+
+    private func testSSHConnection() {
+        isTestingConnection = true
+        connectionTestResult = nil
+
+        Task {
+            let config = SSHConnectionConfig(
+                host: sshHost,
+                port: Int(sshPort) ?? 22,
+                username: sshUser,
+                keyPath: sshKeyPath.isEmpty ? nil : sshKeyPath
+            )
+            let error = await sshConnectionManager.testConnection(config)
+            isTestingConnection = false
+            if let error {
+                connectionTestSuccess = false
+                connectionTestResult = error
+            } else {
+                connectionTestSuccess = true
+                connectionTestResult = "Connected"
+            }
+        }
+    }
+
     private func detectPackageManager() -> String {
         if FileManager.default.fileExists(atPath: "\(repoPath)/bun.lockb") { return "bun" }
         if FileManager.default.fileExists(atPath: "\(repoPath)/pnpm-lock.yaml") { return "pnpm" }
@@ -622,7 +868,7 @@ struct AddProjectView: View {
 
         Task {
             // 1. Create git worktree
-            let transport = LocalTransport()
+            let transport = makeTransport()
             let git = GitService(transport: transport, repoPath: repoPath)
             let worktreePath = "\(worktreeBasePath)/\(branchName)"
 
@@ -661,6 +907,7 @@ struct AddProjectView: View {
                 project.sshHost = sshHost
                 project.sshUser = sshUser
                 project.sshPort = Int(sshPort) ?? 22
+                project.sshKeyPath = sshKeyPath.isEmpty ? nil : sshKeyPath
             }
 
             // Ensure profile exists
@@ -724,6 +971,7 @@ struct AddProjectView: View {
             project.sshHost = sshHost
             project.sshUser = sshUser
             project.sshPort = Int(sshPort) ?? 22
+            project.sshKeyPath = sshKeyPath.isEmpty ? nil : sshKeyPath
         }
 
         // Create or update profile
@@ -778,7 +1026,6 @@ struct AddProjectView: View {
 
         // Write .wtmux/config.json and update .gitignore
         Task {
-            let configService = ConfigService()
             let startCmd: String? = startClaudeInTerminals ? "claude" : (terminalStartCommand.isEmpty ? nil : terminalStartCommand)
             let config = ProjectConfig(
                 envFilesToCopy: Array(selectedEnvFiles),
@@ -797,11 +1044,17 @@ struct AddProjectView: View {
                     },
                 terminalStartCommand: startCmd
             )
-            do {
-                try await configService.writeConfig(config, forRepo: repoPath)
-                try await configService.ensureGitignore(forRepo: repoPath)
-            } catch {
-                logger.error("Failed to write config for '\(repoPath)': \(error.localizedDescription)")
+
+            if isRemote {
+                await writeRemoteConfig(config)
+            } else {
+                let configService = ConfigService()
+                do {
+                    try await configService.writeConfig(config, forRepo: repoPath)
+                    try await configService.ensureGitignore(forRepo: repoPath)
+                } catch {
+                    logger.error("Failed to write config for '\(repoPath)': \(error.localizedDescription)")
+                }
             }
         }
 
@@ -825,6 +1078,70 @@ struct AddProjectView: View {
         detectedEnvFiles = detected
         for file in selected {
             selectedEnvFiles.insert(file)
+        }
+    }
+
+    /// Builds a transport from the current form state (SSH or local).
+    private func makeTransport() -> CommandTransport {
+        if isRemote, !sshHost.isEmpty, !sshUser.isEmpty {
+            let config = SSHConnectionConfig(
+                host: sshHost,
+                port: Int(sshPort) ?? 22,
+                username: sshUser,
+                keyPath: sshKeyPath.isEmpty ? nil : sshKeyPath
+            )
+            return SSHTransport(connectionManager: sshConnectionManager, config: config)
+        }
+        return LocalTransport()
+    }
+
+    private func browseForKeyFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.message = "Select an SSH private key file"
+        panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".ssh")
+
+        if panel.runModal() == .OK, let url = panel.url {
+            sshKeyPath = url.path
+        }
+    }
+
+    private func writeRemoteConfig(_ config: ProjectConfig) async {
+        let transport = makeTransport()
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(config)
+            guard let json = String(data: data, encoding: .utf8) else { return }
+
+            // Create .wtmux directory and write config
+            let writeResult = try await transport.execute(
+                "mkdir -p .wtmux && cat > .wtmux/config.json <<'WTEOF'\n\(json)\nWTEOF",
+                in: repoPath
+            )
+            if !writeResult.succeeded {
+                logger.error("Failed to write remote config: \(writeResult.stderr)")
+            }
+
+            // Update .gitignore if needed
+            let grepResult = try await transport.execute(
+                "grep -q '^\\.wtmux$' .gitignore 2>/dev/null",
+                in: repoPath
+            )
+            if !grepResult.succeeded {
+                let appendResult = try await transport.execute(
+                    "echo '.wtmux' >> .gitignore",
+                    in: repoPath
+                )
+                if !appendResult.succeeded {
+                    logger.error("Failed to update remote .gitignore: \(appendResult.stderr)")
+                }
+            }
+        } catch {
+            logger.error("Failed to write remote config for '\(repoPath)': \(error.localizedDescription)")
         }
     }
 

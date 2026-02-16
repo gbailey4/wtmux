@@ -18,6 +18,8 @@ packages:
     path: Packages/WTProcess
   WTTerminal:
     path: Packages/WTTerminal
+  WTSSH:
+    path: Packages/WTSSH
   WTDiff:
     path: Packages/WTDiff
 
@@ -52,6 +54,7 @@ targets:
       - package: WTGit
       - package: WTProcess
       - package: WTTerminal
+      - package: WTSSH
       - package: WTDiff
     info:
       path: WTMux/Info.plist
@@ -79,6 +82,12 @@ targets:
       properties:
         com.apple.security.app-sandbox: false
     postBuildScripts:
+      - name: "Bundle remote scripts"
+        basedOnDependencyAnalysis: false
+        script: |
+          mkdir -p "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/Resources/remote-scripts"
+          cp -f "$SRCROOT/Resources/remote-scripts/wtmux-mcp.py" "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/Resources/remote-scripts/"
+          cp -f "$SRCROOT/Resources/remote-scripts/wtmux-hook.py" "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/Resources/remote-scripts/"
       - name: "Build and embed wtmux-mcp"
         basedOnDependencyAnalysis: false
         script: |
