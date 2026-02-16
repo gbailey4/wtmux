@@ -50,6 +50,8 @@ struct ContentView: View {
     @State private var showCloseTabAlert = false
     @State private var pendingCloseSessionId: String?
     @State private var pendingPostCloseAction: (() -> Void)?
+    @State private var showCloseWindowAlert = false
+    @State private var pendingCloseWindowID: UUID?
     @State private var renamingWindowID: UUID?
     @State private var windowRenameText: String = ""
     @FocusState private var isWindowRenameFocused: Bool
@@ -173,6 +175,19 @@ struct ContentView: View {
         .task { await pollForConfigFiles() }
         .onChange(of: projects) { registerWorktreePaths() }
         .onChange(of: totalWorktreeCount) { registerWorktreePaths() }
+        .alert("Close Window?", isPresented: $showCloseWindowAlert) {
+            Button("Close", role: .destructive) {
+                if let id = pendingCloseWindowID {
+                    paneManager.removeWindow(id: id)
+                    pendingCloseWindowID = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingCloseWindowID = nil
+            }
+        } message: {
+            Text("This window has running terminal processes. Closing it will terminate them.")
+        }
         .alert("Close Terminal?", isPresented: $showCloseTabAlert) {
             Button("Close", role: .destructive) {
                 if let id = pendingCloseSessionId {
@@ -425,7 +440,7 @@ struct ContentView: View {
                     }
             }
             Button {
-                paneManager.removeWindow(id: window.id)
+                closeWindow(id: window.id)
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .bold))
@@ -465,6 +480,40 @@ struct ContentView: View {
             paneManager.renameWindow(id: windowID, name: trimmed)
         }
         renamingWindowID = nil
+    }
+
+    // MARK: - Window Close
+
+    private func closeWindow(id: UUID) {
+        if windowHasRunningProcesses(id: id) {
+            pendingCloseWindowID = id
+            showCloseWindowAlert = true
+        } else {
+            paneManager.removeWindow(id: id)
+        }
+    }
+
+    private func windowHasRunningProcesses(id: UUID) -> Bool {
+        guard let window = paneManager.windows.first(where: { $0.id == id }) else { return false }
+        for column in window.columns {
+            for pane in column.panes {
+                let tabs = terminalSessionManager.orderedSessions(forPane: pane.id.uuidString)
+                if tabs.contains(where: { $0.terminalView?.hasChildProcesses() == true }) {
+                    return true
+                }
+            }
+            if let worktreeID = column.worktreeID {
+                let othersHaveIt = paneManager.windows.contains { w in
+                    w.id != id && w.columns.contains { $0.worktreeID == worktreeID }
+                }
+                if !othersHaveIt {
+                    let runners = terminalSessionManager.sessions(forWorktree: worktreeID)
+                        .filter { SessionID.isRunner($0.id) && $0.state == .running }
+                    if !runners.isEmpty { return true }
+                }
+            }
+        }
+        return false
     }
 
     // MARK: - Cmd+W / Cmd+Shift+W
