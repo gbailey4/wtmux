@@ -3,11 +3,12 @@ import SwiftUI
 import WTCore
 import WTTerminal
 
-/// Self-contained runner panel view that handles both expanded (terminal) and collapsed (status bar) states.
+/// Self-contained runner panel view that handles both expanded (terminal) and collapsed (header row) states.
 /// Placed at the column level so runners are shared across all panes showing the same worktree.
 struct RunnerPanelView: View {
     let worktree: Worktree
     let terminalSessionManager: TerminalSessionManager
+    let paneManager: SplitPaneManager
     @Binding var showRunnerPanel: Bool
     var isPaneFocused: Bool = true
 
@@ -86,89 +87,110 @@ struct RunnerPanelView: View {
     }
 
     var body: some View {
-        if showRunnerPanel && (!runnerTabs.isEmpty || hasRunConfigurations) {
-            runnerTerminalsView
-        } else if !configRunnerTabs.isEmpty || hasRunConfigurations {
-            runnerStatusBar
+        if hasRunConfigurations || !runnerTabs.isEmpty {
+            VStack(spacing: 0) {
+                runnersHeaderRow
+                if showRunnerPanel {
+                    Divider()
+                    runnerTabBar
+                    if isSetupGroupActive && setupRunnerTabs.count > 1 {
+                        setupSubTabBar
+                    }
+                    ZStack {
+                        ForEach(runnerTabs) { session in
+                            let isActiveRunner = session.id == activeRunnerTabId
+                            TerminalRepresentable(session: session, isActive: isActiveRunner && isPaneFocused, theme: currentTheme)
+                                .opacity(isActiveRunner ? 1 : 0)
+                                .allowsHitTesting(isActiveRunner)
+                        }
+                    }
+                }
+            }
+            .alert("Runners Already Active", isPresented: $showRunnerConflictAlert) {
+                Button("Stop & Switch") {
+                    stopConflictingAndStartRunners()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                if conflictingPorts.isEmpty {
+                    Text("Worktree \"\(conflictingWorktreeName)\" is already running. Starting runners here may cause port conflicts.")
+                } else {
+                    let ports = conflictingPorts.map(String.init).joined(separator: ", ")
+                    Text("Worktree \"\(conflictingWorktreeName)\" is already using port\(conflictingPorts.count > 1 ? "s" : "") \(ports). Stop its runners and start here instead?")
+                }
+            }
+            .sheet(isPresented: $showRerunSetupSheet) {
+                RerunSetupSheet(
+                    suppressConfirm: $suppressSetupConfirm,
+                    onRun: {
+                        if suppressSetupConfirm {
+                            worktree.project?.profile?.confirmSetupRerun = false
+                        }
+                        showRerunSetupSheet = false
+                        runSetup()
+                    },
+                    onCancel: { showRerunSetupSheet = false }
+                )
+            }
         }
     }
 
-    // MARK: - Runner Terminals (Expanded)
+    // MARK: - Runners Header Row (always visible)
 
     @ViewBuilder
-    private var runnerTerminalsView: some View {
+    private var runnersHeaderRow: some View {
         let _ = terminalSessionManager.runnerStateVersion
-        let activeSession = activeRunnerTabId.flatMap { terminalSessionManager.session(for: $0) }
-        VStack(spacing: 0) {
-            runnerTabBar
-            if isSetupGroupActive && setupRunnerTabs.count > 1 {
-                setupSubTabBar
-            }
-            ZStack {
-                ForEach(runnerTabs) { session in
-                    let isActiveRunner = session.id == activeRunnerTabId
-                    TerminalRepresentable(session: session, isActive: isActiveRunner && isPaneFocused, theme: currentTheme)
-                        .opacity(isActiveRunner ? 1 : 0)
-                        .allowsHitTesting(isActiveRunner)
+        Button {
+            if !showRunnerPanel {
+                showRunnerPanel = true
+                ensureRunnerSessions()
+                if configRunnerTabs.isEmpty {
+                    launchRunners()
                 }
-
-                if let session = activeSession, session.deferExecution {
-                    Color.black.opacity(0.4)
-                        .allowsHitTesting(true)
-                        .onHover { inside in
-                            if inside { NSCursor.arrow.push() } else { NSCursor.pop() }
-                        }
-                    Button {
-                        if let conflict = conflictingWorktree() {
-                            conflictingWorktreeName = conflict.name
-                            conflictingPorts = conflictingPortList()
-                            showRunnerConflictAlert = true
-                        } else {
-                            terminalSessionManager.startSession(id: session.id)
-                        }
-                    } label: {
-                        VStack(spacing: 8) {
-                            Image(systemName: "play.circle.fill")
-                                .font(.system(size: 40))
-                            Text("Start \(session.title)")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                        }
-                        .foregroundStyle(.white)
-                        .padding(20)
-                        .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .alert("Runners Already Active", isPresented: $showRunnerConflictAlert) {
-            Button("Stop & Switch") {
-                stopConflictingAndStartRunners()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            if conflictingPorts.isEmpty {
-                Text("Worktree \"\(conflictingWorktreeName)\" is already running. Starting runners here may cause port conflicts.")
             } else {
-                let ports = conflictingPorts.map(String.init).joined(separator: ", ")
-                Text("Worktree \"\(conflictingWorktreeName)\" is already using port\(conflictingPorts.count > 1 ? "s" : "") \(ports). Stop its runners and start here instead?")
+                showRunnerPanel = false
             }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(showRunnerPanel ? 90 : 0))
+
+                Text("Runners")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.primary)
+
+                runnerCountBadge
+
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
         }
-        .sheet(isPresented: $showRerunSetupSheet) {
-            RerunSetupSheet(
-                suppressConfirm: $suppressSetupConfirm,
-                onRun: {
-                    if suppressSetupConfirm {
-                        worktree.project?.profile?.confirmSetupRerun = false
-                    }
-                    showRerunSetupSheet = false
-                    runSetup()
-                },
-                onCancel: { showRerunSetupSheet = false }
-            )
+        .buttonStyle(.plain)
+        .background(.bar)
+    }
+
+    @ViewBuilder
+    private var runnerCountBadge: some View {
+        let running = configRunnerTabs.filter { $0.state == .running }.count
+        let total = hasRunConfigurations ? runConfigurations.count : configRunnerTabs.count
+
+        if running > 0 {
+            Text("\(running) running")
+                .font(.caption)
+                .foregroundStyle(.green)
+        } else if total > 0 {
+            Text("\(total) available")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
+
+    // MARK: - Runner Tab Bar (expanded)
 
     @ViewBuilder
     private var runnerTabBar: some View {
@@ -197,12 +219,12 @@ struct RunnerPanelView: View {
                 } label: {
                     HStack(spacing: 3) {
                         Image(systemName: "gearshape")
-                            .font(.system(size: 11))
+                            .font(.system(size: 13))
                         Text("Run Setup")
                             .font(.subheadline)
                     }
+                    .frame(height: 24)
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
                 }
                 .buttonStyle(.plain)
                 .help("Run Setup Commands")
@@ -214,24 +236,47 @@ struct RunnerPanelView: View {
                 } label: {
                     HStack(spacing: 3) {
                         Image(systemName: "play.fill")
-                            .font(.system(size: 11))
+                            .font(.system(size: 13))
                         Text("Start Default")
                             .font(.subheadline)
                     }
+                    .frame(height: 24)
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
                 }
                 .buttonStyle(.plain)
                 .help("Start Default Runners")
             }
+
+            // Open Shell button
+            Button {
+                if let paneId = paneManager.focusedPane?.id.uuidString {
+                    terminalSessionManager.createTab(
+                        forPane: paneId,
+                        worktreeId: worktreeId,
+                        workingDirectory: worktree.path,
+                        initialCommand: nil
+                    )
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "terminal")
+                    Text("Open Shell")
+                }
+                .font(.subheadline)
+                .frame(height: 24)
+                .padding(.horizontal, 8)
+            }
+            .buttonStyle(.plain)
+            .help("Open a new shell terminal tab")
 
             if hasStartedSessions {
                 Button {
                     restartAllRunners()
                 } label: {
                     Image(systemName: "arrow.counterclockwise")
-                        .font(.subheadline)
-                        .padding(4)
+                        .font(.system(size: 13))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Restart All")
@@ -240,8 +285,9 @@ struct RunnerPanelView: View {
                     stopAllRunners()
                 } label: {
                     Image(systemName: "stop.fill")
-                        .font(.subheadline)
-                        .padding(4)
+                        .font(.system(size: 13))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Stop All")
@@ -250,24 +296,15 @@ struct RunnerPanelView: View {
                     removeAllRunners()
                 } label: {
                     Image(systemName: "xmark.circle")
-                        .font(.subheadline)
-                        .padding(4)
+                        .font(.system(size: 13))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Close All Runners")
             }
-
-            Button {
-                showRunnerPanel = false
-            } label: {
-                Image(systemName: "chevron.down")
-                    .font(.subheadline)
-                    .padding(4)
-            }
-            .buttonStyle(.plain)
-            .help("Collapse Runner Panel")
-            .padding(.trailing, 4)
         }
+        .padding(.trailing, 4)
         .background(.bar)
     }
 
@@ -346,7 +383,9 @@ struct RunnerPanelView: View {
                         }
                     } label: {
                         Image(systemName: "play.fill")
-                            .font(.system(size: 11))
+                            .font(.system(size: 13))
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help("Start")
@@ -355,7 +394,9 @@ struct RunnerPanelView: View {
                         terminalSessionManager.restartSession(id: session.id)
                     } label: {
                         Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 11))
+                            .font(.system(size: 13))
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help("Restart")
@@ -364,7 +405,9 @@ struct RunnerPanelView: View {
                         terminalSessionManager.stopSession(id: session.id)
                     } label: {
                         Image(systemName: "stop.fill")
-                            .font(.system(size: 11))
+                            .font(.system(size: 13))
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help("Stop")
@@ -451,7 +494,9 @@ struct RunnerPanelView: View {
                     confirmAndRunSetup()
                 } label: {
                     Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 11))
+                        .font(.system(size: 13))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Rerun Setup")
@@ -461,6 +506,8 @@ struct RunnerPanelView: View {
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .bold))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Dismiss Setup")
@@ -534,90 +581,6 @@ struct RunnerPanelView: View {
 
     private func isDefaultRunner(_ session: TerminalSession) -> Bool {
         runConfiguration(for: session)?.autoStart ?? true
-    }
-
-    // MARK: - Status Bar (Collapsed)
-
-    @ViewBuilder
-    private var runnerStatusBar: some View {
-        let _ = terminalSessionManager.runnerStateVersion
-        Button {
-            showRunnerPanel = true
-            ensureRunnerSessions()
-            if configRunnerTabs.isEmpty {
-                launchRunners()
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-
-                if configRunnerTabs.isEmpty {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                    Text(runConfigSummaryText)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                } else {
-                    runnerStatusSummary
-                }
-
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(.bar)
-    }
-
-    @ViewBuilder
-    private var runnerStatusSummary: some View {
-        let running = configRunnerTabs.filter { $0.state == .running }.count
-        let failed = configRunnerTabs.filter { $0.state == .failed }.count
-        let idle = configRunnerTabs.filter { $0.deferExecution }.count
-        let stopped = configRunnerTabs.filter { !$0.deferExecution && $0.state != .running && $0.state != .failed }.count
-
-        HStack(spacing: 8) {
-            if running > 0 {
-                HStack(spacing: 3) {
-                    Circle().fill(.green).frame(width: 8, height: 8)
-                    Text("\(running) running").font(.subheadline).foregroundStyle(.secondary)
-                }
-            }
-            if failed > 0 {
-                HStack(spacing: 3) {
-                    Circle().fill(.red).frame(width: 8, height: 8)
-                    Text("\(failed) failed").font(.subheadline).foregroundStyle(.secondary)
-                }
-            }
-            if stopped > 0 {
-                HStack(spacing: 3) {
-                    Circle().fill(.secondary).frame(width: 8, height: 8)
-                    Text("\(stopped) stopped").font(.subheadline).foregroundStyle(.secondary)
-                }
-            }
-            if idle > 0 && idle == configRunnerTabs.count {
-                Text(runConfigSummaryText).font(.subheadline).foregroundStyle(.secondary)
-            }
-
-            let allPorts = configRunnerTabs.flatMap(\.listeningPorts).sorted()
-            if !allPorts.isEmpty {
-                HStack(spacing: 3) {
-                    ForEach(allPorts, id: \.self) { port in
-                        Text(":\(port)")
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Color.accentColor.opacity(0.15), in: Capsule())
-                    }
-                }
-            }
-        }
     }
 
     private var runConfigSummaryText: String {
