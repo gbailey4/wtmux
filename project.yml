@@ -58,8 +58,8 @@ targets:
       path: WTMux/Info.plist
       properties:
         CFBundleIconFile: AppIcon
-        CFBundleName: WTMux
-        CFBundleDisplayName: WTMux
+        CFBundleName: WTMux Dev
+        CFBundleDisplayName: WTMux Dev
         CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleShortVersionString: $(MARKETING_VERSION)
@@ -112,7 +112,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.grahampark.wtmux.stable
-        PRODUCT_NAME: "WTMux Stable"
+        PRODUCT_NAME: "Stable"
         MARKETING_VERSION: 0.1.0
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: 6.0
@@ -141,8 +141,8 @@ targets:
       path: WTMux/Info.plist
       properties:
         CFBundleIconFile: AppIcon
-        CFBundleName: "WTMux Stable"
-        CFBundleDisplayName: "WTMux Stable"
+        CFBundleName: "Stable"
+        CFBundleDisplayName: "Stable"
         CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleShortVersionString: $(MARKETING_VERSION)
