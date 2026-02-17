@@ -624,11 +624,14 @@ struct AddProjectView: View {
             // 1. Create git worktree
             let transport = LocalTransport()
             let git = GitService(transport: transport, repoPath: repoPath)
-            let worktreePath = "\(worktreeBasePath)/\(branchName)"
-
-            // Skip git worktree add if this worktree already exists
             let existingWorktrees = (try? await git.worktreeList()) ?? []
-            let alreadyExists = existingWorktrees.contains { $0.path == worktreePath }
+            let existingPaths = Set(existingWorktrees.map(\.path))
+            let worktreePath = WorktreePathResolver.resolve(
+                basePath: worktreeBasePath,
+                branchName: branchName,
+                existingPaths: existingPaths
+            )
+            let alreadyExists = existingPaths.contains(worktreePath)
 
             if !alreadyExists {
                 do {

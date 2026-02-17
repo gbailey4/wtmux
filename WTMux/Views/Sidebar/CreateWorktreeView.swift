@@ -176,22 +176,24 @@ struct CreateWorktreeView: View {
 
             let effectiveBranch: String
             let effectiveBaseBranch: String
-            let worktreePath: String
 
             if isExisting {
                 effectiveBranch = selectedExistingBranch
                 effectiveBaseBranch = project.defaultBranch
-                worktreePath = "\(project.worktreeBasePath)/\(selectedExistingBranch)"
             } else {
                 effectiveBranch = branchName
                 effectiveBaseBranch = baseBranch
-                worktreePath = "\(project.worktreeBasePath)/\(branchName)"
             }
 
             do {
-                // Skip git worktree add if this worktree already exists
                 let existingWorktrees = (try? await git.worktreeList()) ?? []
-                let alreadyExists = existingWorktrees.contains { $0.path == worktreePath }
+                let existingPaths = Set(existingWorktrees.map(\.path))
+                let worktreePath = WorktreePathResolver.resolve(
+                    basePath: project.worktreeBasePath,
+                    branchName: effectiveBranch,
+                    existingPaths: existingPaths
+                )
+                let alreadyExists = existingPaths.contains(worktreePath)
 
                 if !alreadyExists {
                     if isExisting {
