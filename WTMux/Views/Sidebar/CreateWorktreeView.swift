@@ -189,17 +189,23 @@ struct CreateWorktreeView: View {
             }
 
             do {
-                if isExisting {
-                    try await git.worktreeAddExisting(
-                        path: worktreePath,
-                        branch: effectiveBranch
-                    )
-                } else {
-                    try await git.worktreeAdd(
-                        path: worktreePath,
-                        branch: effectiveBranch,
-                        baseBranch: effectiveBaseBranch
-                    )
+                // Skip git worktree add if this worktree already exists
+                let existingWorktrees = (try? await git.worktreeList()) ?? []
+                let alreadyExists = existingWorktrees.contains { $0.path == worktreePath }
+
+                if !alreadyExists {
+                    if isExisting {
+                        try await git.worktreeAddExisting(
+                            path: worktreePath,
+                            branch: effectiveBranch
+                        )
+                    } else {
+                        try await git.worktreeAdd(
+                            path: worktreePath,
+                            branch: effectiveBranch,
+                            baseBranch: effectiveBaseBranch
+                        )
+                    }
                 }
 
                 // Apply profile: copy env files from main repo to new worktree

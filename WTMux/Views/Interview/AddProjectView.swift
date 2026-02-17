@@ -628,22 +628,28 @@ struct AddProjectView: View {
             let git = GitService(transport: transport, repoPath: repoPath)
             let worktreePath = "\(worktreeBasePath)/\(branchName)"
 
-            do {
-                if isExistingBranch {
-                    try await git.worktreeAddExisting(
-                        path: worktreePath,
-                        branch: branchName
-                    )
-                } else {
-                    try await git.worktreeAdd(
-                        path: worktreePath,
-                        branch: branchName,
-                        baseBranch: defaultBranch
-                    )
+            // Skip git worktree add if this worktree already exists
+            let existingWorktrees = (try? await git.worktreeList()) ?? []
+            let alreadyExists = existingWorktrees.contains { $0.path == worktreePath }
+
+            if !alreadyExists {
+                do {
+                    if isExistingBranch {
+                        try await git.worktreeAddExisting(
+                            path: worktreePath,
+                            branch: branchName
+                        )
+                    } else {
+                        try await git.worktreeAdd(
+                            path: worktreePath,
+                            branch: branchName,
+                            baseBranch: defaultBranch
+                        )
+                    }
+                } catch {
+                    errorMessage = "Failed to create worktree: \(error.localizedDescription)"
+                    return
                 }
-            } catch {
-                errorMessage = "Failed to create worktree: \(error.localizedDescription)"
-                return
             }
 
             // 2. Create or reuse project
