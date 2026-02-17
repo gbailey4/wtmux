@@ -103,6 +103,12 @@ struct WorktreeColumnView: View {
             if let wt = worktree {
                 showConfigPendingBanner = wt.project?.needsClaudeConfig == true
                 showSetupBanner = wt.needsSetup == true
+                // Auto-launch Claude config when the column first loads for a project that needs it
+                if wt.project?.needsClaudeConfig == true, !isClaudeConfigRunning,
+                   claudeIntegrationService.canUseClaudeConfig {
+                    showConfigPendingBanner = false
+                    openClaudeConfigTerminal(worktree: wt)
+                }
             }
         }
         .onChange(of: worktree?.needsSetup) { _, newValue in
@@ -202,9 +208,11 @@ struct WorktreeColumnView: View {
     }
 
     private func openClaudeConfigTerminal(worktree: Worktree) {
-        guard let repoPath = worktree.project?.repoPath else { return }
+        guard let repoPath = worktree.project?.repoPath,
+              let pane = column.panes.first else { return }
         ClaudeConfigHelper.openConfigTerminal(
             terminalSessionManager: terminalSessionManager,
+            paneId: pane.id.uuidString,
             worktreeId: worktree.path,
             workingDirectory: worktree.path,
             repoPath: repoPath

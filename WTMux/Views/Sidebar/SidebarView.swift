@@ -149,13 +149,19 @@ struct SidebarView: View {
                     .contextMenu {
                         if let firstWorktree = project.worktrees.sorted(by: { $0.sortOrder < $1.sortOrder }).first {
                             Button {
-                                ClaudeConfigHelper.openConfigTerminal(
-                                    terminalSessionManager: terminalSessionManager,
-                                    worktreeId: firstWorktree.path,
-                                    workingDirectory: firstWorktree.path,
-                                    repoPath: project.repoPath
-                                )
                                 selectedWorktreeID.wrappedValue = firstWorktree.path
+                                // Defer to next run loop so the pane is created before we add the tab
+                                DispatchQueue.main.async {
+                                    if let loc = paneManager.findWorktreeLocation(firstWorktree.path) {
+                                        ClaudeConfigHelper.openConfigTerminal(
+                                            terminalSessionManager: terminalSessionManager,
+                                            paneId: loc.paneID.uuidString,
+                                            worktreeId: firstWorktree.path,
+                                            workingDirectory: firstWorktree.path,
+                                            repoPath: project.repoPath
+                                        )
+                                    }
+                                }
                             } label: {
                                 Label("Configure with Claude", systemImage: "terminal")
                             }
@@ -200,7 +206,7 @@ struct SidebarView: View {
             CreateWorktreeView(project: project, paneManager: paneManager)
         }
         .sheet(item: $editingProject) { project in
-            ProjectSettingsView(project: project, terminalSessionManager: terminalSessionManager)
+            ProjectSettingsView(project: project, terminalSessionManager: terminalSessionManager, paneManager: paneManager)
         }
         .sheet(item: $worktreeToDelete) { wt in
             DeleteWorktreeSheet(

@@ -157,8 +157,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingAddProject) {
             AddProjectView(
-                selectedWorktreeID: selectedWorktreeID,
-                terminalSessionManager: terminalSessionManager
+                selectedWorktreeID: selectedWorktreeID
             )
         }
         .onOpenURL { url in

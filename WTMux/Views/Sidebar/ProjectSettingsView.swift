@@ -10,6 +10,7 @@ private let logger = Logger(subsystem: "com.wtmux", category: "ProjectSettingsVi
 struct ProjectSettingsView: View {
     @Bindable var project: Project
     let terminalSessionManager: TerminalSessionManager
+    let paneManager: SplitPaneManager
     @Environment(\.dismiss) private var dismiss
     @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
 
@@ -34,9 +35,10 @@ struct ProjectSettingsView: View {
     @State private var startClaudeInTerminals: Bool
     @State private var confirmSetupRerun: Bool
 
-    init(project: Project, terminalSessionManager: TerminalSessionManager) {
+    init(project: Project, terminalSessionManager: TerminalSessionManager, paneManager: SplitPaneManager) {
         self.project = project
         self.terminalSessionManager = terminalSessionManager
+        self.paneManager = paneManager
         _name = State(initialValue: project.name)
         _repoPath = State(initialValue: project.repoPath)
         _defaultBranch = State(initialValue: project.defaultBranch)
@@ -374,13 +376,19 @@ struct ProjectSettingsView: View {
         } else {
             Button {
                 let worktree = project.worktrees.sorted(by: { $0.sortOrder < $1.sortOrder }).first!
-                ClaudeConfigHelper.openConfigTerminal(
-                    terminalSessionManager: terminalSessionManager,
-                    worktreeId: worktree.path,
-                    workingDirectory: worktree.path,
-                    repoPath: repoPath
-                )
                 dismiss()
+                // Defer so the pane is available after sheet dismissal
+                DispatchQueue.main.async {
+                    if let loc = paneManager.findWorktreeLocation(worktree.path) {
+                        ClaudeConfigHelper.openConfigTerminal(
+                            terminalSessionManager: terminalSessionManager,
+                            paneId: loc.paneID.uuidString,
+                            worktreeId: worktree.path,
+                            workingDirectory: worktree.path,
+                            repoPath: repoPath
+                        )
+                    }
+                }
             } label: {
                 Label("Configure with Claude", systemImage: "terminal")
             }

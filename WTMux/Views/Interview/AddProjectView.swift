@@ -3,7 +3,6 @@ import SwiftUI
 import SwiftData
 import WTCore
 import WTGit
-import WTTerminal
 import WTTransport
 import os.log
 
@@ -11,7 +10,6 @@ private let logger = Logger(subsystem: "com.wtmux", category: "AddProjectView")
 
 struct AddProjectView: View {
     @Binding var selectedWorktreeID: String?
-    let terminalSessionManager: TerminalSessionManager
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -702,15 +700,8 @@ struct AddProjectView: View {
                 logger.error("Failed to save project with Claude setup: \(error.localizedDescription)")
             }
 
-            // 4. Pre-create terminal session with claude command
-            ClaudeConfigHelper.openConfigTerminal(
-                terminalSessionManager: terminalSessionManager,
-                worktreeId: worktreePath,
-                workingDirectory: worktreePath,
-                repoPath: repoPath
-            )
-
-            // 5. Navigate to the new worktree and dismiss
+            // 4. Navigate to the new worktree and dismiss
+            // (Claude config terminal is auto-launched by WorktreeColumnView when needsClaudeConfig is true)
             selectedWorktreeID = worktreePath
             dismiss()
         }
