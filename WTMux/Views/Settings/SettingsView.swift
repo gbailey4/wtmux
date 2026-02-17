@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 import WTTerminal
 
 struct SettingsView: View {
-    @AppStorage("defaultShell") private var defaultShell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+    @AppStorage("defaultShell") private var defaultShell = Shell.default
     @AppStorage("terminalFontSize") private var terminalFontSize = 13.0
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
 

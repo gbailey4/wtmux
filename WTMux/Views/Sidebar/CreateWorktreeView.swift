@@ -100,7 +100,7 @@ struct CreateWorktreeView: View {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Create") { createWorktree() }
+                Button(creationMode == .existingBranch ? "Open" : "Create") { createWorktree() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(isCreateDisabled)
             }
@@ -168,6 +168,8 @@ struct CreateWorktreeView: View {
         errorMessage = nil
         checkedOutConflict = nil
 
+        let isExisting = creationMode == .existingBranch
+
         Task {
             let transport = LocalTransport()
             let git = GitService(transport: transport, repoPath: project.repoPath)
@@ -176,29 +178,27 @@ struct CreateWorktreeView: View {
             let effectiveBaseBranch: String
             let worktreePath: String
 
-            switch creationMode {
-            case .newBranch:
-                effectiveBranch = branchName
-                effectiveBaseBranch = baseBranch
-                worktreePath = "\(project.worktreeBasePath)/\(branchName)"
-            case .existingBranch:
+            if isExisting {
                 effectiveBranch = selectedExistingBranch
                 effectiveBaseBranch = project.defaultBranch
                 worktreePath = "\(project.worktreeBasePath)/\(selectedExistingBranch)"
+            } else {
+                effectiveBranch = branchName
+                effectiveBaseBranch = baseBranch
+                worktreePath = "\(project.worktreeBasePath)/\(branchName)"
             }
 
             do {
-                switch creationMode {
-                case .newBranch:
+                if isExisting {
+                    try await git.worktreeAddExisting(
+                        path: worktreePath,
+                        branch: effectiveBranch
+                    )
+                } else {
                     try await git.worktreeAdd(
                         path: worktreePath,
                         branch: effectiveBranch,
                         baseBranch: effectiveBaseBranch
-                    )
-                case .existingBranch:
-                    try await git.worktreeAddExisting(
-                        path: worktreePath,
-                        branch: effectiveBranch
                     )
                 }
 

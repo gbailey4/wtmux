@@ -90,7 +90,7 @@ public final class TerminalSession: Identifiable {
         title: String,
         worktreeId: String = "",
         workingDirectory: String,
-        shellPath: String = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh",
+        shellPath: String = Shell.default,
         initialCommand: String? = nil,
         deferExecution: Bool = false
     ) {

@@ -48,7 +48,6 @@ struct AddProjectView: View {
     // Configure with Claude
     @State private var showFirstWorktreeAlert = false
     @State private var firstWorktreeBranch = ""
-    @State private var firstWorktreeIsExisting = false
     @State private var claudeEnableError: String?
 
     enum InterviewStep: CaseIterable {
@@ -165,9 +164,8 @@ struct AddProjectView: View {
                 onCancel: { showFirstWorktreeAlert = false },
                 onCreate: { branch, isExisting in
                     firstWorktreeBranch = branch
-                    firstWorktreeIsExisting = isExisting
                     showFirstWorktreeAlert = false
-                    createBareProjectWithClaude()
+                    createBareProjectWithClaude(isExistingBranch: isExisting)
                 }
             )
         }
@@ -618,7 +616,7 @@ struct AddProjectView: View {
         return try? modelContext.fetch(descriptor).first
     }
 
-    private func createBareProjectWithClaude() {
+    private func createBareProjectWithClaude(isExistingBranch: Bool) {
         let branchName = firstWorktreeBranch.trimmingCharacters(in: .whitespaces)
         guard !branchName.isEmpty else { return }
 
@@ -631,7 +629,7 @@ struct AddProjectView: View {
             let worktreePath = "\(worktreeBasePath)/\(branchName)"
 
             do {
-                if firstWorktreeIsExisting {
+                if isExistingBranch {
                     try await git.worktreeAddExisting(
                         path: worktreePath,
                         branch: branchName
@@ -912,7 +910,7 @@ private struct FirstWorktreeSheet: View {
                 Button("Cancel", action: onCancel)
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Create") {
+                Button(mode == .existingBranch ? "Open" : "Create") {
                     onCreate(effectiveBranch, mode == .existingBranch)
                 }
                 .keyboardShortcut(.defaultAction)

@@ -18,7 +18,7 @@ public final class TerminalSessionManager: @unchecked Sendable {
         title: String,
         worktreeId: String = "",
         workingDirectory: String,
-        shellPath: String = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh",
+        shellPath: String = Shell.default,
         initialCommand: String? = nil
     ) -> TerminalSession {
         if let existing = sessions[id] {

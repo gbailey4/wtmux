@@ -194,11 +194,17 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
         super.processTerminated(source, exitCode: exitCode)
     }
 
+    /// Environment variables that should not propagate from the app to child terminals.
+    /// `CLAUDECODE` — Claude Code sets this to detect nested sessions; inheriting it
+    /// causes all terminals to reject `claude` with "cannot launch inside another session".
+    private static let strippedEnvVars: Set<String> = ["CLAUDECODE"]
+
     private func startProcessIfNeeded() {
         guard !processStarted else { return }
         processStarted = true
 
         var env = ProcessInfo.processInfo.environment
+        for key in Self.strippedEnvVars { env.removeValue(forKey: key) }
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
         let envStrings = env.map { "\($0.key)=\($0.value)" }
