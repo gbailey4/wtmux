@@ -246,3 +246,33 @@ struct MockTransport: CommandTransport {
     #expect(result[1].branch == "feature-a")
     #expect(result[2].branch == "feature-b")
 }
+
+// MARK: - GitError.fromWorktreeAdd
+
+@Test func fromWorktreeAddParsesConflictPath() {
+    let stderr = "fatal: 'feature-x' is already used by worktree at '/Users/dev/project-worktrees/feature-x'"
+    let error = GitError.fromWorktreeAdd(stderr: stderr, branch: "feature-x")
+    if case .branchAlreadyCheckedOut(let branch, let path) = error {
+        #expect(branch == "feature-x")
+        #expect(path == "/Users/dev/project-worktrees/feature-x")
+    } else {
+        Issue.record("Expected branchAlreadyCheckedOut, got \(error)")
+    }
+}
+
+@Test func fromWorktreeAddFallsBackToCommandFailed() {
+    let stderr = "fatal: some other git error"
+    let error = GitError.fromWorktreeAdd(stderr: stderr, branch: "feature-x")
+    if case .commandFailed(let message) = error {
+        #expect(message == stderr)
+    } else {
+        Issue.record("Expected commandFailed, got \(error)")
+    }
+}
+
+@Test func branchAlreadyCheckedOutErrorDescription() {
+    let error = GitError.branchAlreadyCheckedOut(branch: "feature-x", worktreePath: "/tmp/wt")
+    let description = error.errorDescription ?? ""
+    #expect(description.contains("feature-x"))
+    #expect(description.contains("/tmp/wt"))
+}

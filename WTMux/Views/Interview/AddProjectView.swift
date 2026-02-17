@@ -48,6 +48,7 @@ struct AddProjectView: View {
     // Configure with Claude
     @State private var showFirstWorktreeAlert = false
     @State private var firstWorktreeBranch = ""
+    @State private var firstWorktreeIsExisting = false
     @State private var claudeEnableError: String?
 
     enum InterviewStep: CaseIterable {
@@ -158,14 +159,17 @@ struct AddProjectView: View {
             }
             .padding()
         }
-        .alert("Create First Worktree", isPresented: $showFirstWorktreeAlert) {
-            TextField("Branch name", text: $firstWorktreeBranch)
-            Button("Create") {
-                createBareProjectWithClaude()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Enter a branch name for your first worktree. Claude will auto-configure the project in the terminal.")
+        .sheet(isPresented: $showFirstWorktreeAlert) {
+            FirstWorktreeSheet(
+                availableBranches: availableBranches,
+                onCancel: { showFirstWorktreeAlert = false },
+                onCreate: { branch, isExisting in
+                    firstWorktreeBranch = branch
+                    firstWorktreeIsExisting = isExisting
+                    showFirstWorktreeAlert = false
+                    createBareProjectWithClaude()
+                }
+            )
         }
         .frame(width: 600, height: 500)
     }
@@ -627,11 +631,18 @@ struct AddProjectView: View {
             let worktreePath = "\(worktreeBasePath)/\(branchName)"
 
             do {
-                try await git.worktreeAdd(
-                    path: worktreePath,
-                    branch: branchName,
-                    baseBranch: defaultBranch
-                )
+                if firstWorktreeIsExisting {
+                    try await git.worktreeAddExisting(
+                        path: worktreePath,
+                        branch: branchName
+                    )
+                } else {
+                    try await git.worktreeAdd(
+                        path: worktreePath,
+                        branch: branchName,
+                        baseBranch: defaultBranch
+                    )
+                }
             } catch {
                 errorMessage = "Failed to create worktree: \(error.localizedDescription)"
                 return
@@ -845,6 +856,71 @@ struct AddProjectView: View {
         case .configureProfile: "Configure"
         case .review: "Review"
         }
+    }
+}
+
+private struct FirstWorktreeSheet: View {
+    let availableBranches: [String]
+    let onCancel: () -> Void
+    let onCreate: (_ branch: String, _ isExisting: Bool) -> Void
+
+    @State private var mode: WorktreeCreationMode = .newBranch
+    @State private var newBranchName = ""
+    @State private var selectedExistingBranch = ""
+
+    private var effectiveBranch: String {
+        switch mode {
+        case .newBranch: newBranchName.trimmingCharacters(in: .whitespaces)
+        case .existingBranch: selectedExistingBranch
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Create First Worktree")
+                .font(.headline)
+
+            Text("Choose a branch for your first worktree. Claude will auto-configure the project in the terminal.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            Picker("Mode", selection: $mode) {
+                ForEach(WorktreeCreationMode.allCases, id: \.self) { m in
+                    Text(m.rawValue).tag(m)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            switch mode {
+            case .newBranch:
+                TextField("Branch name", text: $newBranchName)
+                    .textFieldStyle(.roundedBorder)
+
+            case .existingBranch:
+                Picker("Branch", selection: $selectedExistingBranch) {
+                    Text("Select a branch").tag("")
+                    ForEach(availableBranches, id: \.self) { branch in
+                        Text(branch).tag(branch)
+                    }
+                }
+                .labelsHidden()
+            }
+
+            HStack {
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Create") {
+                    onCreate(effectiveBranch, mode == .existingBranch)
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(effectiveBranch.isEmpty)
+            }
+        }
+        .padding()
+        .frame(width: 320)
     }
 }
 

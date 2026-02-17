@@ -96,6 +96,16 @@ public actor GitService {
         }
     }
 
+    public func worktreeAddExisting(path: String, branch: String) async throws {
+        let result = try await transport.execute(
+            [gitPath, "worktree", "add", path, branch],
+            in: repoPath
+        )
+        guard result.succeeded else {
+            throw GitError.fromWorktreeAdd(stderr: result.stderr, branch: branch)
+        }
+    }
+
     public func worktreeRemove(path: String, force: Bool = false) async throws {
         var args = [gitPath, "worktree", "remove", path]
         if force { args.insert("--force", at: 3) }
@@ -313,11 +323,25 @@ public struct GitWorktreeInfo: Sendable {
 
 public enum GitError: Error, LocalizedError {
     case commandFailed(String)
+    case branchAlreadyCheckedOut(branch: String, worktreePath: String)
 
     public var errorDescription: String? {
         switch self {
         case .commandFailed(let message):
             return "Git command failed: \(message)"
+        case .branchAlreadyCheckedOut(let branch, let worktreePath):
+            return "Branch '\(branch)' is already checked out at \(worktreePath)"
         }
+    }
+
+    /// Parse `fatal: '<branch>' is already used by worktree at '<path>'`
+    static func fromWorktreeAdd(stderr: String, branch: String) -> GitError {
+        let pattern = #"is already used by worktree at '([^']+)'"#
+        if let regex = try? NSRegularExpression(pattern: pattern),
+           let match = regex.firstMatch(in: stderr, range: NSRange(stderr.startIndex..., in: stderr)),
+           let range = Range(match.range(at: 1), in: stderr) {
+            return .branchAlreadyCheckedOut(branch: branch, worktreePath: String(stderr[range]))
+        }
+        return .commandFailed(stderr)
     }
 }
