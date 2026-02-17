@@ -104,6 +104,96 @@ targets:
           cp -f "$SRCROOT/Packages/WTHook/.build/$SWIFT_CONFIG/wtmux-hook" "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/wtmux-hook"
           codesign --force --sign - "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/wtmux-hook"
 
+  WTMux-Stable:
+    type: application
+    platform: macOS
+    sources:
+      - path: WTMux
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.grahampark.wtmux.stable
+        PRODUCT_NAME: "WTMux Stable"
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+        SWIFT_VERSION: 6.0
+        ENABLE_PREVIEWS: YES
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: NO
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+        SWIFT_STRICT_CONCURRENCY: complete
+        MACOSX_DEPLOYMENT_TARGET: "15.0"
+        COMBINE_HIDPI_IMAGES: YES
+      configs:
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+    dependencies:
+      - package: WTCore
+      - package: WTTransport
+      - package: WTGit
+      - package: WTProcess
+      - package: WTTerminal
+      - package: WTSSH
+      - package: WTDiff
+    info:
+      path: WTMux/Info.plist
+      properties:
+        CFBundleIconFile: AppIcon
+        CFBundleName: "WTMux Stable"
+        CFBundleDisplayName: "WTMux Stable"
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundlePackageType: APPL
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        LSApplicationCategoryType: public.app-category.developer-tools
+        CFBundleURLTypes:
+          - CFBundleURLName: com.grahampark.wtmux.stable
+            CFBundleURLSchemes:
+              - wtmux-stable
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.grahampark.wtmux.stable.worktree-reference
+            UTTypeDescription: WTMux Stable Worktree Reference
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification: {}
+    entitlements:
+      path: WTMux/WTMux.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+    postBuildScripts:
+      - name: "Bundle remote scripts"
+        basedOnDependencyAnalysis: false
+        script: |
+          mkdir -p "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/Resources/remote-scripts"
+          cp -f "$SRCROOT/Resources/remote-scripts/wtmux-mcp.py" "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/Resources/remote-scripts/"
+          cp -f "$SRCROOT/Resources/remote-scripts/wtmux-hook.py" "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/Resources/remote-scripts/"
+      - name: "Build and embed wtmux-mcp"
+        basedOnDependencyAnalysis: false
+        script: |
+          if [ "$CONFIGURATION" = "Release" ]; then
+            SWIFT_CONFIG="release"
+          else
+            SWIFT_CONFIG="debug"
+          fi
+          swift build --package-path "$SRCROOT/Packages/WTMCP" -c $SWIFT_CONFIG 2>&1
+          cp -f "$SRCROOT/Packages/WTMCP/.build/$SWIFT_CONFIG/wtmux-mcp" "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/wtmux-mcp"
+          codesign --force --sign - "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/wtmux-mcp"
+      - name: "Build and embed wtmux-hook"
+        basedOnDependencyAnalysis: false
+        script: |
+          if [ "$CONFIGURATION" = "Release" ]; then
+            SWIFT_CONFIG="release"
+          else
+            SWIFT_CONFIG="debug"
+          fi
+          swift build --package-path "$SRCROOT/Packages/WTHook" -c $SWIFT_CONFIG 2>&1
+          cp -f "$SRCROOT/Packages/WTHook/.build/$SWIFT_CONFIG/wtmux-hook" "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/wtmux-hook"
+          codesign --force --sign - "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/wtmux-hook"
+
 schemes:
   WTMux:
     build:
@@ -117,5 +207,17 @@ schemes:
       config: Release
     analyze:
       config: Debug
+    archive:
+      config: Release
+  WTMux-Stable:
+    build:
+      targets:
+        WTMux-Stable: all
+    run:
+      config: Release
+    profile:
+      config: Release
+    analyze:
+      config: Release
     archive:
       config: Release
