@@ -30,6 +30,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.grahampark.wtmux
+        WTMUX_DISPLAY_NAME: WTMux Dev
+        WTMUX_URL_SCHEME: wtmux
         MARKETING_VERSION: 0.1.0
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: 6.0
@@ -58,8 +60,8 @@ targets:
       path: WTMux/Info.plist
       properties:
         CFBundleIconFile: AppIcon
-        CFBundleName: WTMux Dev
-        CFBundleDisplayName: WTMux Dev
+        CFBundleName: $(WTMUX_DISPLAY_NAME)
+        CFBundleDisplayName: $(WTMUX_DISPLAY_NAME)
         CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleShortVersionString: $(MARKETING_VERSION)
@@ -67,12 +69,12 @@ targets:
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         LSApplicationCategoryType: public.app-category.developer-tools
         CFBundleURLTypes:
-          - CFBundleURLName: com.grahampark.wtmux
+          - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER)
             CFBundleURLSchemes:
-              - wtmux
+              - $(WTMUX_URL_SCHEME)
         UTExportedTypeDeclarations:
-          - UTTypeIdentifier: com.grahampark.wtmux.worktree-reference
-            UTTypeDescription: WTMux Worktree Reference
+          - UTTypeIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER).worktree-reference
+            UTTypeDescription: $(WTMUX_DISPLAY_NAME) Worktree Reference
             UTTypeConformsTo:
               - public.data
             UTTypeTagSpecification: {}
@@ -113,6 +115,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.grahampark.wtmux.stable
         PRODUCT_NAME: "Stable"
+        WTMUX_DISPLAY_NAME: Stable
+        WTMUX_URL_SCHEME: wtmux-stable
         MARKETING_VERSION: 0.1.0
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: 6.0
@@ -141,8 +145,8 @@ targets:
       path: WTMux/Info.plist
       properties:
         CFBundleIconFile: AppIcon
-        CFBundleName: "Stable"
-        CFBundleDisplayName: "Stable"
+        CFBundleName: $(WTMUX_DISPLAY_NAME)
+        CFBundleDisplayName: $(WTMUX_DISPLAY_NAME)
         CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleShortVersionString: $(MARKETING_VERSION)
@@ -150,12 +154,12 @@ targets:
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         LSApplicationCategoryType: public.app-category.developer-tools
         CFBundleURLTypes:
-          - CFBundleURLName: com.grahampark.wtmux.stable
+          - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER)
             CFBundleURLSchemes:
-              - wtmux-stable
+              - $(WTMUX_URL_SCHEME)
         UTExportedTypeDeclarations:
-          - UTTypeIdentifier: com.grahampark.wtmux.stable.worktree-reference
-            UTTypeDescription: WTMux Stable Worktree Reference
+          - UTTypeIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER).worktree-reference
+            UTTypeDescription: $(WTMUX_DISPLAY_NAME) Worktree Reference
             UTTypeConformsTo:
               - public.data
             UTTypeTagSpecification: {}

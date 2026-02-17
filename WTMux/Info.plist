@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>WTMux</string>
+	<string>$(WTMUX_DISPLAY_NAME)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIconFile</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>WTMux</string>
+	<string>$(WTMUX_DISPLAY_NAME)</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -24,10 +24,10 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.grahampark.wtmux</string>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>wtmux</string>
+				<string>$(WTMUX_URL_SCHEME)</string>
 			</array>
 		</dict>
 	</array>
@@ -45,9 +45,9 @@
 				<string>public.data</string>
 			</array>
 			<key>UTTypeDescription</key>
-			<string>WTMux Worktree Reference</string>
+			<string>$(WTMUX_DISPLAY_NAME) Worktree Reference</string>
 			<key>UTTypeIdentifier</key>
-			<string>com.grahampark.wtmux.worktree-reference</string>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER).worktree-reference</string>
 			<key>UTTypeTagSpecification</key>
 			<dict/>
 		</dict>
