@@ -49,6 +49,7 @@ struct ChangesPanel: View {
     @Binding var changedFileCount: Int
 
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
+    @Environment(ThemeManager.self) private var themeManager
 
     @State private var diffViewMode: DiffViewMode = .byCommit
     @State private var changeGroups: [ChangeGroup] = []
@@ -59,7 +60,7 @@ struct ChangesPanel: View {
     @State private var commitFileCache: [String: [GitFileStatus]] = [:]
 
     private var currentTheme: TerminalTheme {
-        TerminalThemes.theme(forId: terminalThemeId)
+        themeManager.theme(forId: terminalThemeId)
     }
 
     private var diffWindowFile: DiffFile? {

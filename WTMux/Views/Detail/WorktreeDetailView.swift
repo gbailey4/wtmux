@@ -14,6 +14,7 @@ struct WorktreeDetailView: View {
     var isPaneFocused: Bool = true
 
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
+    @Environment(ThemeManager.self) private var themeManager
 
     @State private var showCloseTabAlert = false
     @State private var pendingCloseSessionId: String?
@@ -23,7 +24,7 @@ struct WorktreeDetailView: View {
     @FocusState private var isRenameFieldFocused: Bool
 
     private var currentTheme: TerminalTheme {
-        TerminalThemes.theme(forId: terminalThemeId)
+        themeManager.theme(forId: terminalThemeId)
     }
 
     private var worktreeId: String { worktree.path }

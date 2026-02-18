@@ -13,6 +13,7 @@ struct WorktreeColumnView: View {
 
     @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
+    @Environment(ThemeManager.self) private var themeManager
 
     @State private var showSetupBanner = false
     @State private var showConfigPendingBanner = false
@@ -41,7 +42,7 @@ struct WorktreeColumnView: View {
     }
 
     private var currentTheme: TerminalTheme {
-        TerminalThemes.theme(forId: terminalThemeId)
+        themeManager.theme(forId: terminalThemeId)
     }
 
     private var isFocused: Bool {

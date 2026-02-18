@@ -14,6 +14,7 @@ struct RunnerPanelView: View {
 
     @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
+    @Environment(ThemeManager.self) private var themeManager
 
     @State private var showRunnerConflictAlert = false
     @State private var conflictingWorktreeName: String = ""
@@ -23,7 +24,7 @@ struct RunnerPanelView: View {
     @State private var lastActiveSetupSessionId: [String: String] = [:]
 
     private var currentTheme: TerminalTheme {
-        TerminalThemes.theme(forId: terminalThemeId)
+        themeManager.theme(forId: terminalThemeId)
     }
 
     private var worktreeId: String { worktree.path }

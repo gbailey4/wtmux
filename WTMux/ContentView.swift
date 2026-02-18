@@ -50,6 +50,7 @@ struct ContentView: View {
     @State private var pendingCloseSessionId: String?
     @State private var pendingPostCloseAction: (() -> Void)?
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
+    @Environment(ThemeManager.self) private var themeManager
     @State private var sidebarCollapsed = false
     @State private var showCloseWindowAlert = false
     @State private var pendingCloseWindowID: UUID?
@@ -58,7 +59,7 @@ struct ContentView: View {
     @FocusState private var isWindowRenameFocused: Bool
 
     private var currentTheme: TerminalTheme {
-        TerminalThemes.theme(forId: terminalThemeId)
+        themeManager.theme(forId: terminalThemeId)
     }
 
     private var selectedWorktreeID: Binding<String?> {

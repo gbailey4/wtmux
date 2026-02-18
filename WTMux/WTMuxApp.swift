@@ -33,6 +33,7 @@ struct WTMuxApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @State private var claudeIntegrationService = ClaudeIntegrationService()
     @State private var claudeStatusManager = ClaudeStatusManager()
+    @State private var themeManager = ThemeManager()
 
     let modelContainer: ModelContainer
     private let initError: String?
@@ -90,6 +91,7 @@ struct WTMuxApp: App {
         .modelContainer(modelContainer)
         .environment(claudeIntegrationService)
         .environment(claudeStatusManager)
+        .environment(themeManager)
         .defaultSize(width: 1280, height: 800)
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified(showsTitle: true))
@@ -100,6 +102,7 @@ struct WTMuxApp: App {
         Settings {
             SettingsView()
                 .environment(claudeIntegrationService)
+                .environment(themeManager)
         }
     }
 }

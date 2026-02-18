@@ -11,7 +11,9 @@ struct SettingsView: View {
     @State private var hiddenEditorIds = ExternalEditor.hiddenEditorIds
 
     @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
+    @Environment(ThemeManager.self) private var themeManager
     @State private var agentMessage: String?
+    @State private var importError: String?
 
     private var allEditors: [ExternalEditor] {
         ExternalEditor.installedEditors(custom: customEditors, hidden: hiddenEditorIds)
@@ -76,17 +78,27 @@ struct SettingsView: View {
                     Text("\(Int(terminalFontSize))pt")
                         .monospacedDigit()
                 }
+            }
+
+            Section("Theme") {
+                themeGrid(themes: TerminalThemes.builtInThemes)
+
+                if !themeManager.customThemes.isEmpty {
+                    Divider()
+                    Text("Imported")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    themeGrid(themes: themeManager.customThemes, allowDelete: true)
+                }
 
                 HStack {
-                    Text("Theme")
-                    Picker("Theme", selection: $terminalThemeId) {
-                        ForEach(TerminalThemes.allThemes) { theme in
-                            HStack(spacing: 8) {
-                                ThemeSwatchView(theme: theme)
-                                Text(theme.name)
-                            }
-                            .tag(theme.id)
-                        }
+                    Button("Import .itermcolors...") {
+                        importITermColors()
+                    }
+                    if let importError {
+                        Text(importError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
                     }
                 }
             }
@@ -137,8 +149,53 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .labelsHidden()
-        .frame(width: 450)
+        .frame(width: 500)
         .navigationTitle("Settings")
+    }
+
+    private static let gridColumns = [GridItem(.adaptive(minimum: 100, maximum: 140), spacing: 8)]
+
+    @ViewBuilder
+    private func themeGrid(themes: [TerminalTheme], allowDelete: Bool = false) -> some View {
+        LazyVGrid(columns: Self.gridColumns, spacing: 8) {
+            ForEach(themes) { theme in
+                ThemeCardView(
+                    theme: theme,
+                    isSelected: terminalThemeId == theme.id,
+                    allowDelete: allowDelete
+                ) {
+                    terminalThemeId = theme.id
+                } onDelete: {
+                    if terminalThemeId == theme.id {
+                        terminalThemeId = TerminalThemes.defaultTheme.id
+                    }
+                    themeManager.deleteCustomTheme(id: theme.id)
+                }
+            }
+        }
+    }
+
+    private func importITermColors() {
+        importError = nil
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "itermcolors") ?? .propertyList]
+        panel.allowsMultipleSelection = true
+        panel.message = "Select .itermcolors theme files"
+
+        guard panel.runModal() == .OK else { return }
+
+        var lastImported: TerminalTheme?
+        for url in panel.urls {
+            do {
+                let theme = try themeManager.importITermColors(from: url)
+                lastImported = theme
+            } catch {
+                importError = "Failed to import \(url.lastPathComponent): \(error)"
+            }
+        }
+        if let lastImported {
+            terminalThemeId = lastImported.id
+        }
     }
 
     private func browseShell() {
@@ -241,27 +298,68 @@ struct SettingsView: View {
     }
 }
 
-private struct ThemeSwatchView: View {
+private struct ThemeCardView: View {
     let theme: TerminalTheme
+    let isSelected: Bool
+    var allowDelete: Bool = false
+    var onSelect: () -> Void
+    var onDelete: () -> Void = {}
+
+    @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 1) {
-            Rectangle()
-                .fill(Color(nsColor: theme.background.toNSColor()))
-            Rectangle()
-                .fill(Color(nsColor: theme.foreground.toNSColor()))
-            Rectangle()
-                .fill(Color(nsColor: theme.ansiColors[1].toNSColor())) // red
-            Rectangle()
-                .fill(Color(nsColor: theme.ansiColors[2].toNSColor())) // green
-            Rectangle()
-                .fill(Color(nsColor: theme.ansiColors[4].toNSColor())) // blue
+        Button(action: onSelect) {
+            VStack(spacing: 4) {
+                // Terminal preview
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(theme.background.toColor())
+                        .frame(height: 52)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("~/project")
+                            .font(.system(size: 7, design: .monospaced))
+                            .foregroundStyle(theme.foreground.toColor())
+                        HStack(spacing: 2) {
+                            ForEach(0..<8) { i in
+                                Circle()
+                                    .fill(theme.ansiColors[i].toColor())
+                                    .frame(width: 5, height: 5)
+                            }
+                        }
+                    }
+                    .padding(5)
+
+                    if allowDelete && isHovered {
+                        Button {
+                            onDelete()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.white, .red)
+                        }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        .padding(3)
+                    }
+                }
+
+                Text(theme.name)
+                    .font(.caption2)
+                    .lineLimit(1)
+                    .foregroundStyle(.primary)
+            }
         }
-        .frame(width: 60, height: 16)
-        .clipShape(RoundedRectangle(cornerRadius: 3))
-        .overlay(
-            RoundedRectangle(cornerRadius: 3)
-                .strokeBorder(.separator, lineWidth: 0.5)
+        .buttonStyle(.plain)
+        .padding(4)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+        )
+        .onHover { isHovered = $0 }
     }
 }

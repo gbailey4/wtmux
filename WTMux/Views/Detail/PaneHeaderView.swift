@@ -14,6 +14,7 @@ struct PaneHeaderView: View {
     var isActive: Bool = false
 
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
+    @Environment(ThemeManager.self) private var themeManager
 
     @State private var showClosePaneAlert = false
     @State private var isSplitHovered = false
@@ -21,7 +22,7 @@ struct PaneHeaderView: View {
     @State private var isCloseHovered = false
 
     private var currentTheme: TerminalTheme {
-        TerminalThemes.theme(forId: terminalThemeId)
+        themeManager.theme(forId: terminalThemeId)
     }
 
     private var hasRunningProcesses: Bool {
