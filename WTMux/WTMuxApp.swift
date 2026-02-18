@@ -45,8 +45,7 @@ struct WTMuxApp: App {
                 ProjectProfile.self,
                 RunConfiguration.self,
             ])
-            // Name kept as "WTEasy" for backward compatibility with existing data stores
-            let config = ModelConfiguration("WTEasy", isStoredInMemoryOnly: false)
+            let config = ModelConfiguration(AppIdentity.storeName, isStoredInMemoryOnly: false)
             modelContainer = try ModelContainer(for: schema, configurations: [config])
             initError = nil
         } catch {

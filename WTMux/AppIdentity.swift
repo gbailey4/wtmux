@@ -1,6 +1,10 @@
 import Foundation
 
 enum AppIdentity {
+    static var storeName: String {
+        Bundle.main.infoDictionary?["WTMuxStoreName"] as? String ?? "WTEasy"
+    }
+
     static var notificationPrefix: String {
         Bundle.main.infoDictionary?["WTMuxNotificationPrefix"] as? String
             ?? "com.grahampark.wtmux"
