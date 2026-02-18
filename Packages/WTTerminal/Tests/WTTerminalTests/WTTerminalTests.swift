@@ -23,42 +23,42 @@ import Testing
     // CSI < u  (pop keyboard mode, no params)
     let input: [UInt8] = [0x1b, 0x5b, 0x3c, 0x75]
     let result = DeferredStartTerminalView.filterKittyKeyboardSequences(input[...])
-    #expect(result.isEmpty)
+    #expect(result.filtered.isEmpty)
 }
 
 @MainActor @Test func filterStripsPopKeyboardModeWithParams() {
     // CSI < 1 u  (pop keyboard mode with param)
     let input: [UInt8] = [0x1b, 0x5b, 0x3c, 0x31, 0x75]
     let result = DeferredStartTerminalView.filterKittyKeyboardSequences(input[...])
-    #expect(result.isEmpty)
+    #expect(result.filtered.isEmpty)
 }
 
 @MainActor @Test func filterStripsPushKeyboardMode() {
     // CSI > 1 u  (push keyboard mode)
     let input: [UInt8] = [0x1b, 0x5b, 0x3e, 0x31, 0x75]
     let result = DeferredStartTerminalView.filterKittyKeyboardSequences(input[...])
-    #expect(result.isEmpty)
+    #expect(result.filtered.isEmpty)
 }
 
 @MainActor @Test func filterStripsQueryKeyboardMode() {
     // CSI ? u  (query keyboard mode)
     let input: [UInt8] = [0x1b, 0x5b, 0x3f, 0x75]
     let result = DeferredStartTerminalView.filterKittyKeyboardSequences(input[...])
-    #expect(result.isEmpty)
+    #expect(result.filtered.isEmpty)
 }
 
 @MainActor @Test func filterPreservesStandardCursorRestore() {
     // CSI u  (standard cursor restore — no private prefix)
     let input: [UInt8] = [0x1b, 0x5b, 0x75]
     let result = DeferredStartTerminalView.filterKittyKeyboardSequences(input[...])
-    #expect(result == input)
+    #expect(result.filtered == input)
 }
 
 @MainActor @Test func filterPreservesSurroundingData() {
     // "AB" + CSI < u + "CD"
     let input: [UInt8] = [0x41, 0x42, 0x1b, 0x5b, 0x3c, 0x75, 0x43, 0x44]
     let result = DeferredStartTerminalView.filterKittyKeyboardSequences(input[...])
-    #expect(result == [0x41, 0x42, 0x43, 0x44]) // "ABCD"
+    #expect(result.filtered == [0x41, 0x42, 0x43, 0x44]) // "ABCD"
 }
 
 @MainActor @Test func filterHandlesMultipleSequences() {
@@ -67,21 +67,82 @@ import Testing
     input += Array("hello".utf8)
     input += [0x1b, 0x5b, 0x3c, 0x75]  // CSI < u
     let result = DeferredStartTerminalView.filterKittyKeyboardSequences(input[...])
-    #expect(result == Array("hello".utf8))
+    #expect(result.filtered == Array("hello".utf8))
 }
 
 @MainActor @Test func filterPassthroughNonKittyEscapes() {
     // CSI H  (cursor home — should pass through)
     let input: [UInt8] = [0x1b, 0x5b, 0x48]
     let result = DeferredStartTerminalView.filterKittyKeyboardSequences(input[...])
-    #expect(result == input)
+    #expect(result.filtered == input)
 }
 
 @MainActor @Test func filterHandlesParamsWithSemicolons() {
     // CSI > 1;2 u  (push with flags)
     let input: [UInt8] = [0x1b, 0x5b, 0x3e, 0x31, 0x3b, 0x32, 0x75]
     let result = DeferredStartTerminalView.filterKittyKeyboardSequences(input[...])
-    #expect(result.isEmpty)
+    #expect(result.filtered.isEmpty)
+}
+
+// MARK: - Kitty command extraction tests
+
+@MainActor @Test func filterExtractsPushCommand() {
+    // CSI > 1 u → push(level: 1)
+    let input: [UInt8] = [0x1b, 0x5b, 0x3e, 0x31, 0x75]
+    let result = DeferredStartTerminalView.filterKittyKeyboardSequences(input[...])
+    #expect(result.commands == [.push(level: 1)])
+}
+
+@MainActor @Test func filterExtractsPushWithZeroLevel() {
+    // CSI > u → push(level: 0)
+    let input: [UInt8] = [0x1b, 0x5b, 0x3e, 0x75]
+    let result = DeferredStartTerminalView.filterKittyKeyboardSequences(input[...])
+    #expect(result.commands == [.push(level: 0)])
+}
+
+@MainActor @Test func filterExtractsPushWithFlags() {
+    // CSI > 3;1 u → push(level: 3), first param only
+    let input: [UInt8] = [0x1b, 0x5b, 0x3e, 0x33, 0x3b, 0x31, 0x75]
+    let result = DeferredStartTerminalView.filterKittyKeyboardSequences(input[...])
+    #expect(result.commands == [.push(level: 3)])
+}
+
+@MainActor @Test func filterExtractsPopDefaultCount() {
+    // CSI < u → pop(count: 1) — no param defaults to 1
+    let input: [UInt8] = [0x1b, 0x5b, 0x3c, 0x75]
+    let result = DeferredStartTerminalView.filterKittyKeyboardSequences(input[...])
+    #expect(result.commands == [.pop(count: 1)])
+}
+
+@MainActor @Test func filterExtractsPopWithCount() {
+    // CSI < 3 u → pop(count: 3)
+    let input: [UInt8] = [0x1b, 0x5b, 0x3c, 0x33, 0x75]
+    let result = DeferredStartTerminalView.filterKittyKeyboardSequences(input[...])
+    #expect(result.commands == [.pop(count: 3)])
+}
+
+@MainActor @Test func filterExtractsQueryCommand() {
+    // CSI ? u → query
+    let input: [UInt8] = [0x1b, 0x5b, 0x3f, 0x75]
+    let result = DeferredStartTerminalView.filterKittyKeyboardSequences(input[...])
+    #expect(result.commands == [.query])
+}
+
+@MainActor @Test func filterExtractsMultipleCommandsInOneSlice() {
+    // CSI > 1 u + "AB" + CSI < u → [push(1), pop(1)]
+    var input: [UInt8] = [0x1b, 0x5b, 0x3e, 0x31, 0x75]  // push 1
+    input += [0x41, 0x42]  // "AB"
+    input += [0x1b, 0x5b, 0x3c, 0x75]  // pop
+    let result = DeferredStartTerminalView.filterKittyKeyboardSequences(input[...])
+    #expect(result.filtered == [0x41, 0x42])
+    #expect(result.commands == [.push(level: 1), .pop(count: 1)])
+}
+
+@MainActor @Test func filterNoCommandsForPlainData() {
+    let input: [UInt8] = Array("hello world".utf8)
+    let result = DeferredStartTerminalView.filterKittyKeyboardSequences(input[...])
+    #expect(result.filtered == input)
+    #expect(result.commands.isEmpty)
 }
 
 // MARK: - Theme tests
