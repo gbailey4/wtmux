@@ -18,7 +18,7 @@ class DroppableSplitView: NSSplitView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        registerForDraggedTypes([WorktreeReference.pasteboardType])
+        registerForDraggedTypes([WorktreeReference.pasteboardType, TerminalTabReference.pasteboardType])
     }
 
     @available(*, unavailable)
@@ -124,9 +124,7 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
         // MARK: - Drag & Drop
 
         private func columnHasActiveSessions(_ column: WorktreeColumn) -> Bool {
-            column.panes.contains { pane in
-                !terminalSessionManager.orderedSessions(forPane: pane.id.uuidString).isEmpty
-            }
+            !terminalSessionManager.orderedSessions(forColumn: column.id.uuidString).isEmpty
         }
 
         func handleDragUpdated(_ info: NSDraggingInfo) -> NSDragOperation {
@@ -216,10 +214,29 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
                 return false
             }
 
-            // Read data synchronously from pasteboard
             let pasteboard = info.draggingPasteboard
+
+            // --- Terminal tab drag (extract tab to new column) ---
+            if let tabData = pasteboard.data(forType: TerminalTabReference.pasteboardType)
+                ?? pasteboard.pasteboardItems?.first?.data(forType: TerminalTabReference.pasteboardType),
+               let tabRef = try? JSONDecoder().decode(TerminalTabReference.self, from: tabData),
+               let fromColumnUUID = UUID(uuidString: tabRef.columnId) {
+                dragLogger.info("Tab drag: session=\(tabRef.sessionId) from=\(tabRef.columnId) zone=\(String(describing: targetZone))")
+                if targetZone == .left || targetZone == .right {
+                    let targetIndex: Int = {
+                        guard let ti = paneManager.columns.firstIndex(where: { $0.id == targetColumn.id }) else { return 0 }
+                        return targetZone == .left ? ti : ti + 1
+                    }()
+                    paneManager.extractTabToNewColumn(sessionId: tabRef.sessionId, fromColumnId: fromColumnUUID, atIndex: targetIndex)
+                } else {
+                    // Center zone or single column: merge tab into target column
+                    paneManager.moveTabToColumn(sessionId: tabRef.sessionId, fromColumnId: fromColumnUUID, toColumnId: targetColumn.id)
+                }
+                return true
+            }
+
+            // --- Worktree drag (from sidebar or column header) ---
             var data = pasteboard.data(forType: WorktreeReference.pasteboardType)
-            // Fallback: .draggable() with CodableRepresentation may wrap data differently
             if data == nil, let item = pasteboard.pasteboardItems?.first {
                 data = item.data(forType: WorktreeReference.pasteboardType)
             }
@@ -234,24 +251,22 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
             }
             dragLogger.info("Drag: drop succeeded worktreeID=\(ref.worktreeID) zone=\(String(describing: targetZone))")
 
-            let sourcePaneUUID = ref.sourcePaneID.flatMap { UUID(uuidString: $0) }
+            let sourceColumnUUID = ref.sourcePaneID.flatMap { UUID(uuidString: $0) }
 
             // --- Sidebar drag (no sourcePaneID) ---
-            if sourcePaneUUID == nil {
+            if sourceColumnUUID == nil {
                 // Single-instance guard: focus existing instead of duplicating
                 if targetColumn.worktreeID != ref.worktreeID,
                    let loc = paneManager.findWorktreeLocation(ref.worktreeID) {
                     paneManager.focusedWindowID = loc.windowID
-                    paneManager.focusedPaneID = loc.paneID
+                    paneManager.focusedColumnID = loc.columnID
                     return true
                 }
 
-                // Same-worktree drop from sidebar: add a split pane
+                // Same-worktree drop from sidebar: create new column with same worktree
                 if targetColumn.worktreeID == ref.worktreeID {
-                    if let pane = targetColumn.panes.first {
-                        paneManager.focusedPaneID = pane.id
-                    }
-                    paneManager.splitSameWorktree()
+                    paneManager.focusedColumnID = targetColumn.id
+                    paneManager.addColumn(worktreeID: ref.worktreeID, after: targetColumn.id)
                     return true
                 }
 
@@ -264,29 +279,24 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
                 case .right:
                     paneManager.addColumn(worktreeID: ref.worktreeID, after: targetColumn.id)
                 case .center:
-                    if let paneID = targetColumn.panes.first?.id {
-                        paneManager.assignWorktree(ref.worktreeID, to: paneID)
-                    }
+                    paneManager.assignWorktree(ref.worktreeID, to: targetColumn.id)
                 case .none:
                     break
                 }
                 return true
             }
 
-            // --- Pane drag (sourcePaneID != nil) ---
-            let sourcePaneID = sourcePaneUUID!
-            let sourceColumn = paneManager.column(forPane: sourcePaneID)
+            // --- Column drag (sourcePaneID is actually the column ID now) ---
+            let sourceColumnID = sourceColumnUUID!
+            let sourceColumn = paneManager.column(for: sourceColumnID)
 
-            // Same-worktree drop: move pane to target column (preserving sessions)
+            // Same-worktree drop: just focus the target
             if targetColumn.worktreeID == ref.worktreeID {
-                let sourceIsInTargetColumn = targetColumn.panes.contains { $0.id == sourcePaneID }
-                if !sourceIsInTargetColumn {
-                    paneManager.movePaneToColumn(paneID: sourcePaneID, targetColumnID: targetColumn.id)
-                }
+                paneManager.focusedColumnID = targetColumn.id
                 return true
             }
 
-            // Different worktree, left/right zone: reorder by moving (not destroy+create)
+            // Different worktree, left/right zone: reorder by moving
             if targetZone == .left || targetZone == .right {
                 guard let sourceColumn else { return false }
                 let targetIndex: Int = {
@@ -294,23 +304,16 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
                     return targetZone == .left ? ti : ti + 1
                 }()
 
-                if sourceColumn.panes.count == 1 {
-                    // Single-pane column: reposition the whole column
-                    paneManager.moveColumn(id: sourceColumn.id, toIndex: targetIndex)
-                } else {
-                    // Multi-pane column: extract the pane into its own column
-                    paneManager.extractPaneToColumn(paneID: sourcePaneID, at: targetIndex)
-                }
+                // Reposition the whole column
+                paneManager.moveColumn(id: sourceColumn.id, toIndex: targetIndex)
                 return true
             }
 
-            // Center zone: replace target column's worktree assignment (existing behavior)
+            // Center zone: replace target column's worktree assignment
             if targetZone == .center {
-                // Remove source pane (terminates sessions — worktree is changing)
-                paneManager.removePane(id: sourcePaneID)
-                if let paneID = targetColumn.panes.first?.id {
-                    paneManager.assignWorktree(ref.worktreeID, to: paneID)
-                }
+                // Remove source column (terminates sessions)
+                paneManager.removeColumn(id: sourceColumnID)
+                paneManager.assignWorktree(ref.worktreeID, to: targetColumn.id)
                 return true
             }
 
@@ -341,7 +344,7 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
             }
 
             // Re-register after rebuild so new hosting views don't shadow our type
-            splitView?.registerForDraggedTypes([WorktreeReference.pasteboardType])
+            splitView?.registerForDraggedTypes([WorktreeReference.pasteboardType, TerminalTabReference.pasteboardType])
             dragLogger.info("rebuildItems columnCount=\(columns.count)")
 
             // Equalize divider positions via controller
@@ -359,7 +362,7 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
                 for (index, column) in columns.enumerated() {
                     itemMap[index].host.rootView = makeView(for: column)
                 }
-                splitView?.registerForDraggedTypes([WorktreeReference.pasteboardType])
+                splitView?.registerForDraggedTypes([WorktreeReference.pasteboardType, TerminalTabReference.pasteboardType])
                 return
             }
 
@@ -402,7 +405,7 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
                 }
             }
 
-            splitView?.registerForDraggedTypes([WorktreeReference.pasteboardType])
+            splitView?.registerForDraggedTypes([WorktreeReference.pasteboardType, TerminalTabReference.pasteboardType])
             dragLogger.info("reconcile incremental columnCount=\(columns.count)")
 
             // Equalize divider positions via controller

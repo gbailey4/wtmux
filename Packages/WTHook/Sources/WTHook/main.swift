@@ -80,11 +80,14 @@ default:
     status = .thinking
 }
 
-let userInfo: [String: String] = [
+var userInfo: [String: String] = [
     "status": status.rawValue,
     "cwd": event.cwd,
     "sessionId": event.session_id,
 ]
+if let columnId = ProcessInfo.processInfo.environment["WTMUX_COLUMN_ID"] {
+    userInfo["columnId"] = columnId
+}
 
 DistributedNotificationCenter.default().postNotificationName(
     NSNotification.Name("\(notificationPrefix()).claudeStatus"),

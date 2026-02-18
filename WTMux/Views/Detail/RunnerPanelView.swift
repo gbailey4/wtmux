@@ -4,13 +4,13 @@ import WTCore
 import WTTerminal
 
 /// Self-contained runner panel view that handles both expanded (terminal) and collapsed (header row) states.
-/// Placed at the column level so runners are shared across all panes showing the same worktree.
+/// Placed at the column level so runners are shared across all columns showing the same worktree.
 struct RunnerPanelView: View {
     let worktree: Worktree
     let terminalSessionManager: TerminalSessionManager
     let paneManager: SplitPaneManager
     @Binding var showRunnerPanel: Bool
-    var isPaneFocused: Bool = true
+    var isColumnFocused: Bool = true
 
     @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
@@ -100,7 +100,7 @@ struct RunnerPanelView: View {
                     ZStack {
                         ForEach(runnerTabs) { session in
                             let isActiveRunner = session.id == activeRunnerTabId
-                            TerminalRepresentable(session: session, isActive: isActiveRunner && isPaneFocused, theme: currentTheme)
+                            TerminalRepresentable(session: session, isActive: isActiveRunner && isColumnFocused, theme: currentTheme)
                                 .opacity(isActiveRunner ? 1 : 0)
                                 .allowsHitTesting(isActiveRunner)
                         }
@@ -250,9 +250,9 @@ struct RunnerPanelView: View {
 
             // Open Shell button
             Button {
-                if let paneId = paneManager.focusedPane?.id.uuidString {
-                    terminalSessionManager.createTab(
-                        forPane: paneId,
+                if let columnId = paneManager.focusedColumn?.id.uuidString {
+                    _ = terminalSessionManager.createTab(
+                        forColumn: columnId,
                         worktreeId: worktreeId,
                         workingDirectory: worktree.path,
                         initialCommand: nil

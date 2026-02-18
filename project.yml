@@ -84,6 +84,11 @@ targets:
             UTTypeConformsTo:
               - public.data
             UTTypeTagSpecification: {}
+          - UTTypeIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER).terminal-tab-reference
+            UTTypeDescription: $(WTMUX_DISPLAY_NAME) Terminal Tab Reference
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification: {}
     entitlements:
       path: WTMux/WTMux.entitlements
       properties:
@@ -172,6 +177,11 @@ targets:
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER).worktree-reference
             UTTypeDescription: $(WTMUX_DISPLAY_NAME) Worktree Reference
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification: {}
+          - UTTypeIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER).terminal-tab-reference
+            UTTypeDescription: $(WTMUX_DISPLAY_NAME) Terminal Tab Reference
             UTTypeConformsTo:
               - public.data
             UTTypeTagSpecification: {}

@@ -11,13 +11,13 @@ enum ClaudeConfigHelper {
     @discardableResult
     static func openConfigTerminal(
         terminalSessionManager: TerminalSessionManager,
-        paneId: String,
+        columnId: String,
         worktreeId: String,
         workingDirectory: String,
         repoPath: String
     ) -> TerminalSession {
         terminalSessionManager.createTab(
-            forPane: paneId,
+            forColumn: columnId,
             worktreeId: worktreeId,
             workingDirectory: workingDirectory,
             initialCommand: configCommand(repoPath: repoPath)

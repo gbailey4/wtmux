@@ -13,7 +13,7 @@ final class WindowState: Identifiable {
     var columns: [WorktreeColumn]
     var kind: WindowTabKind
     var diffFile: DiffFile?
-    var diffSourcePaneID: UUID?
+    var diffSourceColumnID: UUID?
 
     init(id: UUID = UUID(), name: String, columns: [WorktreeColumn], kind: WindowTabKind = .worktrees) {
         self.id = id

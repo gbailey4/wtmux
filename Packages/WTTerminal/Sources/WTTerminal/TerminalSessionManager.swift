@@ -7,7 +7,7 @@ import Foundation
 public final class TerminalSessionManager: @unchecked Sendable {
     public private(set) var sessions: [String: TerminalSession] = [:]
     public private(set) var activeSessionId: [String: String] = [:]
-    public private(set) var tabOrder: [String: [String]] = [:]  // paneId (or worktreeId legacy) → [sessionId]
+    public private(set) var tabOrder: [String: [String]] = [:]  // columnId (or worktreeId legacy) → [sessionId]
     private var tabCounters: [String: Int] = [:]
     private var portScanTimer: Timer?
 
@@ -46,11 +46,11 @@ public final class TerminalSessionManager: @unchecked Sendable {
             .sorted { $0.id < $1.id }
     }
 
-    /// Returns terminal (non-runner) sessions for a worktree in display order (across all panes).
+    /// Returns terminal (non-runner) sessions for a worktree in display order (across all columns).
     public func orderedSessions(forWorktree worktreeId: String) -> [TerminalSession] {
         let tabs = sessions.values
             .filter { $0.worktreeId == worktreeId && !SessionID.isRunner($0.id) }
-        // With pane-scoped sessions, tabOrder is keyed by paneId, so worktreeId lookup
+        // With column-scoped sessions, tabOrder is keyed by columnId, so worktreeId lookup
         // won't find an order. Just sort by id for cleanup/query purposes.
         if let order = tabOrder[worktreeId] {
             let byId = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
@@ -63,11 +63,11 @@ public final class TerminalSessionManager: @unchecked Sendable {
         return tabs.sorted { $0.id < $1.id }
     }
 
-    /// Returns terminal (non-runner) sessions for a specific pane in user-defined display order.
-    public func orderedSessions(forPane paneId: String) -> [TerminalSession] {
+    /// Returns terminal (non-runner) sessions for a specific column in user-defined display order.
+    public func orderedSessions(forColumn columnId: String) -> [TerminalSession] {
         let tabs = sessions.values
-            .filter { $0.paneId == paneId && !SessionID.isRunner($0.id) }
-        if let order = tabOrder[paneId] {
+            .filter { $0.columnId == columnId && !SessionID.isRunner($0.id) }
+        if let order = tabOrder[columnId] {
             let byId = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
             var ordered = order.compactMap { byId[$0] }
             let orderedIds = Set(order)
@@ -78,14 +78,24 @@ public final class TerminalSessionManager: @unchecked Sendable {
         return tabs.sorted { $0.id < $1.id }
     }
 
-    /// Moves a terminal tab to a new index within a pane's tab order.
-    public func moveTab(sessionId: String, toIndex index: Int, inPane paneId: String) {
-        var order = tabOrder[paneId] ?? orderedSessions(forPane: paneId).map(\.id)
+    // Legacy compatibility — callers using forPane: still work
+    public func orderedSessions(forPane paneId: String) -> [TerminalSession] {
+        orderedSessions(forColumn: paneId)
+    }
+
+    /// Moves a terminal tab to a new index within a column's tab order.
+    public func moveTab(sessionId: String, toIndex index: Int, inColumn columnId: String) {
+        var order = tabOrder[columnId] ?? orderedSessions(forColumn: columnId).map(\.id)
         guard let fromIndex = order.firstIndex(of: sessionId) else { return }
         order.remove(at: fromIndex)
         let clampedIndex = min(index, order.count)
         order.insert(sessionId, at: clampedIndex)
-        tabOrder[paneId] = order
+        tabOrder[columnId] = order
+    }
+
+    // Legacy compatibility
+    public func moveTab(sessionId: String, toIndex index: Int, inPane paneId: String) {
+        moveTab(sessionId: sessionId, toIndex: index, inColumn: paneId)
     }
 
     /// Moves a terminal tab to a new index within the worktree's tab order (legacy).
@@ -98,13 +108,13 @@ public final class TerminalSessionManager: @unchecked Sendable {
         tabOrder[worktreeId] = order
     }
 
-    /// Renames a terminal session. Rejects empty strings and duplicate names within the same pane/worktree.
+    /// Renames a terminal session. Rejects empty strings and duplicate names within the same column/worktree.
     @discardableResult
     public func renameTab(sessionId: String, to newTitle: String) -> Bool {
         guard !newTitle.isEmpty, let session = sessions[sessionId] else { return false }
         let siblings: [TerminalSession]
-        if let paneId = session.paneId {
-            siblings = orderedSessions(forPane: paneId)
+        if let columnId = session.columnId {
+            siblings = orderedSessions(forColumn: columnId)
         } else {
             siblings = orderedSessions(forWorktree: session.worktreeId)
         }
@@ -113,11 +123,11 @@ public final class TerminalSessionManager: @unchecked Sendable {
         return true
     }
 
-    /// Creates a pane-scoped terminal tab.
-    public func createTab(forPane paneId: String, worktreeId: String, workingDirectory: String, initialCommand: String? = nil) -> TerminalSession {
-        let count = (tabCounters[paneId] ?? 0) + 1
-        tabCounters[paneId] = count
-        let id = SessionID.tab(paneId: paneId, index: count)
+    /// Creates a column-scoped terminal tab.
+    public func createTab(forColumn columnId: String, worktreeId: String, workingDirectory: String, initialCommand: String? = nil) -> TerminalSession {
+        let count = (tabCounters[columnId] ?? 0) + 1
+        tabCounters[columnId] = count
+        let id = SessionID.tab(columnId: columnId, index: count)
         let title = "Terminal \(count)"
         let session = createSession(
             id: id,
@@ -126,12 +136,17 @@ public final class TerminalSessionManager: @unchecked Sendable {
             workingDirectory: workingDirectory,
             initialCommand: initialCommand
         )
-        session.paneId = paneId
-        activeSessionId[paneId] = id
-        if tabOrder[paneId] != nil {
-            tabOrder[paneId]!.append(id)
+        session.columnId = columnId
+        activeSessionId[columnId] = id
+        if tabOrder[columnId] != nil {
+            tabOrder[columnId]!.append(id)
         }
         return session
+    }
+
+    // Legacy compatibility — callers using forPane: still work
+    public func createTab(forPane paneId: String, worktreeId: String, workingDirectory: String, initialCommand: String? = nil) -> TerminalSession {
+        createTab(forColumn: paneId, worktreeId: worktreeId, workingDirectory: workingDirectory, initialCommand: initialCommand)
     }
 
     /// Creates a worktree-scoped terminal tab (legacy).
@@ -158,13 +173,18 @@ public final class TerminalSessionManager: @unchecked Sendable {
         activeSessionId[worktreeId] = sessionId
     }
 
+    public func setActiveSession(columnId: String, sessionId: String) {
+        activeSessionId[columnId] = sessionId
+    }
+
+    // Legacy compatibility
     public func setActiveSession(paneId: String, sessionId: String) {
-        activeSessionId[paneId] = sessionId
+        setActiveSession(columnId: paneId, sessionId: sessionId)
     }
 
     public func removeTab(sessionId: String) {
         guard let session = sessions[sessionId] else { return }
-        let key = session.paneId ?? session.worktreeId
+        let key = session.columnId ?? session.worktreeId
         let wasActive = activeSessionId[key] == sessionId
 
         session.terminalView?.terminate()
@@ -173,9 +193,9 @@ public final class TerminalSessionManager: @unchecked Sendable {
         tabOrder[key]?.removeAll { $0 == sessionId }
 
         if wasActive {
-            if let paneId = session.paneId {
-                let remaining = orderedSessions(forPane: paneId)
-                activeSessionId[paneId] = remaining.last?.id
+            if let columnId = session.columnId {
+                let remaining = orderedSessions(forColumn: columnId)
+                activeSessionId[columnId] = remaining.last?.id
             } else {
                 let remaining = orderedSessions(forWorktree: session.worktreeId)
                 activeSessionId[session.worktreeId] = remaining.last?.id
@@ -191,10 +211,10 @@ public final class TerminalSessionManager: @unchecked Sendable {
 
     /// Terminates and removes all sessions (tabs + runners) for a worktree.
     public func terminateAllSessionsForWorktree(_ worktreeId: String) {
-        // Collect paneIds before removal
-        let paneIds = Set(sessions.values
+        // Collect columnIds before removal
+        let columnIds = Set(sessions.values
             .filter { $0.worktreeId == worktreeId && !SessionID.isRunner($0.id) }
-            .compactMap(\.paneId))
+            .compactMap(\.columnId))
 
         let tabIds = sessions.values
             .filter { $0.worktreeId == worktreeId && !SessionID.isRunner($0.id) }
@@ -204,11 +224,11 @@ public final class TerminalSessionManager: @unchecked Sendable {
         }
         removeRunnerSessions(forWorktree: worktreeId)
 
-        // Clean up pane-based state
-        for paneId in paneIds {
-            activeSessionId.removeValue(forKey: paneId)
-            tabOrder.removeValue(forKey: paneId)
-            tabCounters.removeValue(forKey: paneId)
+        // Clean up column-based state
+        for columnId in columnIds {
+            activeSessionId.removeValue(forKey: columnId)
+            tabOrder.removeValue(forKey: columnId)
+            tabCounters.removeValue(forKey: columnId)
         }
         // Also clean up legacy worktree-keyed state
         activeSessionId.removeValue(forKey: worktreeId)
@@ -216,15 +236,46 @@ public final class TerminalSessionManager: @unchecked Sendable {
         tabCounters.removeValue(forKey: worktreeId)
     }
 
-    /// Terminates and removes all tab sessions for a specific pane.
-    public func terminateSessionsForPane(_ paneId: String) {
-        let tabIds = orderedSessions(forPane: paneId).map(\.id)
+    /// Terminates and removes all tab sessions for a specific column.
+    public func terminateSessionsForColumn(_ columnId: String) {
+        let tabIds = orderedSessions(forColumn: columnId).map(\.id)
         for sessionId in tabIds {
             removeTab(sessionId: sessionId)
         }
-        activeSessionId.removeValue(forKey: paneId)
-        tabOrder.removeValue(forKey: paneId)
-        tabCounters.removeValue(forKey: paneId)
+        activeSessionId.removeValue(forKey: columnId)
+        tabOrder.removeValue(forKey: columnId)
+        tabCounters.removeValue(forKey: columnId)
+    }
+
+    // Legacy compatibility
+    public func terminateSessionsForPane(_ paneId: String) {
+        terminateSessionsForColumn(paneId)
+    }
+
+    /// Moves a session from one column to another, preserving the terminal view.
+    public func moveSession(sessionId: String, fromColumn: String, toColumn: String) {
+        guard let session = sessions[sessionId] else { return }
+        let wasActive = activeSessionId[fromColumn] == sessionId
+
+        // Remove from source column's tab order
+        tabOrder[fromColumn]?.removeAll { $0 == sessionId }
+
+        // Update session's column
+        session.columnId = toColumn
+
+        // Add to target column's tab order
+        if tabOrder[toColumn] != nil {
+            tabOrder[toColumn]!.append(sessionId)
+        }
+
+        // Update active session in target
+        activeSessionId[toColumn] = sessionId
+
+        // If it was active in source, pick new active for source
+        if wasActive {
+            let remaining = orderedSessions(forColumn: fromColumn)
+            activeSessionId[fromColumn] = remaining.last?.id
+        }
     }
 
     /// Returns `true` if any session has an active process — either a runner

@@ -4,19 +4,22 @@ import Foundation
 final class WorktreeColumn: Identifiable {
     let id: UUID
     var worktreeID: String?
-    var panes: [PaneState]
     var showRunnerPanel: Bool
+    var showRightPanel: Bool
+    var changedFileCount: Int
     var dropZone: DropZone = .none
 
     init(
         id: UUID = UUID(),
         worktreeID: String? = nil,
-        panes: [PaneState] = [],
-        showRunnerPanel: Bool = false
+        showRunnerPanel: Bool = false,
+        showRightPanel: Bool = false,
+        changedFileCount: Int = 0
     ) {
         self.id = id
         self.worktreeID = worktreeID
-        self.panes = panes.isEmpty ? [PaneState()] : panes
         self.showRunnerPanel = showRunnerPanel
+        self.showRightPanel = showRightPanel
+        self.changedFileCount = changedFileCount
     }
 }

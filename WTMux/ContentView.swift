@@ -75,8 +75,8 @@ struct ContentView: View {
 
     private var showRightPanel: Binding<Bool> {
         Binding(
-            get: { paneManager.focusedPane?.showRightPanel ?? false },
-            set: { paneManager.focusedPane?.showRightPanel = $0 }
+            get: { paneManager.focusedColumn?.showRightPanel ?? false },
+            set: { paneManager.focusedColumn?.showRightPanel = $0 }
         )
     }
 
@@ -89,8 +89,8 @@ struct ContentView: View {
 
     private var changedFileCount: Binding<Int> {
         Binding(
-            get: { paneManager.focusedPane?.changedFileCount ?? 0 },
-            set: { paneManager.focusedPane?.changedFileCount = $0 }
+            get: { paneManager.focusedColumn?.changedFileCount ?? 0 },
+            set: { paneManager.focusedColumn?.changedFileCount = $0 }
         )
     }
 
@@ -147,7 +147,7 @@ struct ContentView: View {
                 }
                 .keyboardShortcut("\\", modifiers: [.command, .shift])
                 .help("Split Right (Cmd+Shift+\\)")
-                .disabled(paneManager.panes.count >= 5)
+                .disabled(paneManager.columns.count >= 5)
             }
         }
         .background {
@@ -158,10 +158,10 @@ struct ContentView: View {
             Button("Close Worktree") { handleCmdShiftW() }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
                 .hidden()
-            Button("Focus Next Pane") { paneManager.focusNextPane() }
+            Button("Focus Next Column") { paneManager.focusNextColumn() }
                 .keyboardShortcut("]", modifiers: .command)
                 .hidden()
-            Button("Focus Previous Pane") { paneManager.focusPreviousPane() }
+            Button("Focus Previous Column") { paneManager.focusPreviousColumn() }
                 .keyboardShortcut("[", modifiers: .command)
                 .hidden()
         }
@@ -541,11 +541,9 @@ struct ContentView: View {
     private func windowHasRunningProcesses(id: UUID) -> Bool {
         guard let window = paneManager.windows.first(where: { $0.id == id }) else { return false }
         for column in window.columns {
-            for pane in column.panes {
-                let tabs = terminalSessionManager.orderedSessions(forPane: pane.id.uuidString)
-                if tabs.contains(where: { $0.terminalView?.hasChildProcesses() == true }) {
-                    return true
-                }
+            let tabs = terminalSessionManager.orderedSessions(forColumn: column.id.uuidString)
+            if tabs.contains(where: { $0.terminalView?.hasChildProcesses() == true }) {
+                return true
             }
             if let worktreeID = column.worktreeID {
                 let othersHaveIt = paneManager.windows.contains { w in
@@ -571,23 +569,22 @@ struct ContentView: View {
             return
         }
 
-        guard let pane = paneManager.focusedPane else {
+        guard let column = paneManager.focusedColumn else {
             return
         }
 
-        let paneId = pane.id.uuidString
-        guard let column = paneManager.column(forPane: pane.id),
-              column.worktreeID != nil else {
-            // Empty pane/column — close the pane
-            paneManager.closeFocusedPane()
+        let columnId = column.id.uuidString
+        guard column.worktreeID != nil else {
+            // Empty column — close it
+            paneManager.closeFocusedColumn()
             return
         }
 
-        let tabs = terminalSessionManager.orderedSessions(forPane: paneId)
-        let activeId = terminalSessionManager.activeSessionId[paneId]
+        let tabs = terminalSessionManager.orderedSessions(forColumn: columnId)
+        let activeId = terminalSessionManager.activeSessionId[columnId]
         guard let activeTab = tabs.first(where: { $0.id == activeId }) ?? tabs.last else {
-            // No tabs — close the pane
-            paneManager.closeFocusedPane()
+            // No tabs — close the column
+            paneManager.closeFocusedColumn()
             return
         }
 
@@ -595,19 +592,19 @@ struct ContentView: View {
             pendingCloseSessionId = activeTab.id
             pendingPostCloseAction = { [weak paneManager, weak terminalSessionManager] in
                 guard let paneManager, let terminalSessionManager else { return }
-                cascadeAfterTabClose(paneId: paneId, paneManager: paneManager, terminalSessionManager: terminalSessionManager)
+                cascadeAfterTabClose(columnId: columnId, paneManager: paneManager, terminalSessionManager: terminalSessionManager)
             }
             showCloseTabAlert = true
         } else {
             terminalSessionManager.removeTab(sessionId: activeTab.id)
-            cascadeAfterTabClose(paneId: paneId, paneManager: paneManager, terminalSessionManager: terminalSessionManager)
+            cascadeAfterTabClose(columnId: columnId, paneManager: paneManager, terminalSessionManager: terminalSessionManager)
         }
     }
 
-    private func cascadeAfterTabClose(paneId: String, paneManager: SplitPaneManager, terminalSessionManager: TerminalSessionManager) {
-        let remaining = terminalSessionManager.orderedSessions(forPane: paneId)
+    private func cascadeAfterTabClose(columnId: String, paneManager: SplitPaneManager, terminalSessionManager: TerminalSessionManager) {
+        let remaining = terminalSessionManager.orderedSessions(forColumn: columnId)
         if !remaining.isEmpty { return }
-        paneManager.closeFocusedPane()
+        paneManager.closeFocusedColumn()
     }
 
     private func handleCmdShiftW() {

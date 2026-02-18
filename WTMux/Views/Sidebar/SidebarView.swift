@@ -26,7 +26,7 @@ struct SidebarView: View {
                 // If already open anywhere, focus it
                 if let loc = paneManager.findWorktreeLocation(worktreeID) {
                     paneManager.focusedWindowID = loc.windowID
-                    paneManager.focusedPaneID = loc.paneID
+                    paneManager.focusedColumnID = loc.columnID
                     return
                 }
 
@@ -75,7 +75,7 @@ struct SidebarView: View {
                             worktree: worktree,
                             isDeleting: deletingWorktreePaths.contains(worktree.path),
                             isRunning: runningWorktreeIds.contains(worktree.path),
-                            isVisibleInPane: paneManager.visibleWorktreeIDs.contains(worktree.path),
+                            isVisibleInColumn: paneManager.visibleWorktreeIDs.contains(worktree.path),
                             claudeStatus: claudeStatusManager.status(forWorktreePath: worktree.path),
                             hasRunConfigurations: hasRunConfigurations(for: worktree),
                             onStartRunners: {
@@ -150,12 +150,12 @@ struct SidebarView: View {
                         if let firstWorktree = project.worktrees.sorted(by: { $0.sortOrder < $1.sortOrder }).first {
                             Button {
                                 selectedWorktreeID.wrappedValue = firstWorktree.path
-                                // Defer to next run loop so the pane is created before we add the tab
+                                // Defer to next run loop so the column is created before we add the tab
                                 DispatchQueue.main.async {
                                     if let loc = paneManager.findWorktreeLocation(firstWorktree.path) {
                                         ClaudeConfigHelper.openConfigTerminal(
                                             terminalSessionManager: terminalSessionManager,
-                                            paneId: loc.paneID.uuidString,
+                                            columnId: loc.columnID.uuidString,
                                             worktreeId: firstWorktree.path,
                                             workingDirectory: firstWorktree.path,
                                             repoPath: project.repoPath
@@ -348,7 +348,7 @@ struct SidebarView: View {
         } label: {
             Label("Open in New Split", systemImage: "rectangle.split.2x1")
         }
-        .disabled(paneManager.panes.count >= 5)
+        .disabled(paneManager.columns.count >= 5)
 
         Divider()
 
@@ -668,7 +668,7 @@ struct WorktreeRow: View {
     let worktree: Worktree
     var isDeleting: Bool = false
     var isRunning: Bool = false
-    var isVisibleInPane: Bool = false
+    var isVisibleInColumn: Bool = false
     var claudeStatus: ClaudeCodeStatus? = nil
     var hasRunConfigurations: Bool = false
     var onStartRunners: (() -> Void)? = nil
@@ -730,11 +730,11 @@ struct WorktreeRow: View {
                     .foregroundStyle(.green)
                     .help("Runners active")
             }
-            if !isDeleting, isVisibleInPane {
+            if !isDeleting, isVisibleInColumn {
                 Circle()
                     .fill(Color.accentColor)
                     .frame(width: 8, height: 8)
-                    .help("Visible in pane")
+                    .help("Visible in column")
             }
         }
         .padding(.vertical, 2)

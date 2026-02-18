@@ -30,6 +30,7 @@ public struct TerminalRepresentable: NSViewRepresentable {
             initialCommand: session.initialCommand,
             deferExecution: session.deferExecution
         )
+        view.columnId = session.columnId
         view.runAsCommand = session.runAsCommand
         if let onExit = session.onProcessExit {
             let sessionId = session.id
@@ -70,6 +71,9 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
     private var resizeTimer: Timer?
     private var deferExecution: Bool
 
+    /// The column ID this terminal belongs to, injected as `WTMUX_COLUMN_ID` env var.
+    public var columnId: String?
+
     /// When true, starts shell with `-c command` instead of interactive mode.
     public var runAsCommand: Bool = false
 
@@ -84,16 +88,6 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
 
     /// Local event monitor for intercepting key events when Kitty mode is active.
     private var keyEventMonitor: Any?
-
-    /// Local event monitor for Shift+click mouse reporting bypass.
-    private var flagsEventMonitor: Any?
-
-    /// Whether we suppressed mouse reporting due to Shift being held.
-    private var didSuppressMouseReporting = false
-
-    /// Buffered PTY data received while Shift is held (selection in progress).
-    /// Prevents SwiftTerm's `feedPrepare()` from clearing the selection.
-    private var shiftSelectionDataBuffer: [[UInt8]] = []
 
     public init(workingDirectory: String, shellPath: String, initialCommand: String? = nil, deferExecution: Bool = false) {
         self.workingDirectory = workingDirectory
@@ -110,11 +104,6 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
         // guard in handleKeyEventForKitty prevents stealing events from other views.
         keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.handleKeyEventForKitty(event) ?? event
-        }
-
-        flagsEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            self?.handleFlagsChangedForMouseBypass(event)
-            return event
         }
     }
 
@@ -154,10 +143,6 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
     ///
     /// Pattern: `ESC [ [<>?] [0-9;]* u`
     open override func dataReceived(slice: ArraySlice<UInt8>) {
-        if didSuppressMouseReporting {
-            shiftSelectionDataBuffer.append(Array(slice))
-            return
-        }
         processReceivedData(slice)
     }
 
@@ -185,14 +170,6 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
                 let arraySlice = Array(buffer)[...]
                 super.dataReceived(slice: arraySlice)
             }
-        }
-    }
-
-    private func flushShiftSelectionBuffer() {
-        let buffered = shiftSelectionDataBuffer
-        shiftSelectionDataBuffer.removeAll()
-        for data in buffered {
-            processReceivedData(data[...])
         }
     }
 
@@ -271,24 +248,6 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
         return (filtered: output, commands: commands)
     }
 
-    // MARK: - Shift+click mouse reporting bypass
-
-    /// Toggles `allowMouseReporting` off while Shift is held so SwiftTerm's
-    /// built-in selection code runs instead of forwarding clicks to the app.
-    /// Standard behavior in iTerm2, WezTerm, and Kitty.
-    private func handleFlagsChangedForMouseBypass(_ event: NSEvent) {
-        guard window?.firstResponder === self else { return }
-        let shiftPressed = event.modifierFlags.contains(.shift)
-        if shiftPressed && allowMouseReporting {
-            allowMouseReporting = false
-            didSuppressMouseReporting = true
-        } else if !shiftPressed && didSuppressMouseReporting {
-            allowMouseReporting = true
-            didSuppressMouseReporting = false
-            flushShiftSelectionBuffer()
-        }
-    }
-
     // MARK: - Kitty keyboard input encoding
 
     /// Install/remove an NSEvent local monitor to intercept key events when Kitty
@@ -302,15 +261,6 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
             if let monitor = keyEventMonitor {
                 NSEvent.removeMonitor(monitor)
                 keyEventMonitor = nil
-            }
-            if let monitor = flagsEventMonitor {
-                NSEvent.removeMonitor(monitor)
-                flagsEventMonitor = nil
-            }
-            if didSuppressMouseReporting {
-                allowMouseReporting = true
-                didSuppressMouseReporting = false
-                flushShiftSelectionBuffer()
             }
         }
     }
@@ -387,8 +337,7 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
     /// Sends Ctrl+U (delete to beginning of line) since SwiftTerm's non-overridable
     /// `doCommand(by:)` doesn't handle the `deleteToBeginningOfLine:` selector.
     public override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        // Shift+Enter → send LF (newline without submit, same as iTerm2/WezTerm)
-        // When Kitty level > 0, the NSEvent monitor encodes it as CSI u instead.
+        // Shift+Enter → LF (newline without submit) when Kitty mode is inactive
         if event.keyCode == 36
             && event.modifierFlags.contains(.shift)
             && !event.modifierFlags.contains(.command)
@@ -396,7 +345,6 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
             send(txt: "\n")
             return true
         }
-
         // Cmd+Backspace → Ctrl+U (delete to beginning of line)
         if event.keyCode == 51 && event.modifierFlags.contains(.command) && kittyKeyboardLevel == 0 {
             send(txt: "\u{15}") // Ctrl+U
@@ -437,6 +385,7 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
         for key in Self.strippedEnvVars { env.removeValue(forKey: key) }
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
+        if let columnId { env["WTMUX_COLUMN_ID"] = columnId }
         let envStrings = env.map { "\($0.key)=\($0.value)" }
 
         let useCommandMode = runAsCommand && initialCommand != nil

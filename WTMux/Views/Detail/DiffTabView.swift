@@ -62,7 +62,7 @@ struct DiffTabView: View {
                 ChangesPanel(
                     worktree: worktree,
                     paneManager: paneManager,
-                    paneID: window.diffSourcePaneID ?? UUID(),
+                    columnID: window.diffSourceColumnID ?? UUID(),
                     changedFileCount: $changedFileCount
                 )
                 .frame(width: 400)

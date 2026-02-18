@@ -4,7 +4,7 @@ import WTGit
 import WTTerminal
 import WTTransport
 
-/// Composes a worktree column: panes area + shared runner panel.
+/// Composes a worktree column: unified header + terminal content + runner panel.
 struct WorktreeColumnView: View {
     let column: WorktreeColumn
     let paneManager: SplitPaneManager
@@ -41,13 +41,26 @@ struct WorktreeColumnView: View {
         )
     }
 
+    private var showRightPanelBinding: Binding<Bool> {
+        Binding(
+            get: { column.showRightPanel },
+            set: { column.showRightPanel = $0 }
+        )
+    }
+
+    private var changedFileCountBinding: Binding<Int> {
+        Binding(
+            get: { column.changedFileCount },
+            set: { column.changedFileCount = $0 }
+        )
+    }
+
     private var currentTheme: TerminalTheme {
         themeManager.theme(forId: terminalThemeId)
     }
 
     private var isFocused: Bool {
-        guard let focusedPaneID = paneManager.focusedPaneID else { return false }
-        return column.panes.contains { $0.id == focusedPaneID }
+        paneManager.focusedColumnID == column.id
     }
 
     var body: some View {
@@ -66,22 +79,29 @@ struct WorktreeColumnView: View {
                 Divider()
             }
 
-            // Panes area
-            if column.panes.count > 1 {
-                ColumnPanesView(
-                    column: column,
-                    paneManager: paneManager,
+            // Unified column header
+            ColumnHeaderView(
+                column: column,
+                paneManager: paneManager,
+                terminalSessionManager: terminalSessionManager,
+                worktree: worktree,
+                isFocused: isFocused
+            )
+            Divider()
+
+            // Terminal content
+            if let worktree {
+                WorktreeDetailView(
+                    worktree: worktree,
+                    columnId: column.id.uuidString,
                     terminalSessionManager: terminalSessionManager,
-                    findWorktree: findWorktree
-                )
-            } else if let pane = column.panes.first {
-                PaneContentView(
-                    pane: pane,
-                    column: column,
                     paneManager: paneManager,
-                    terminalSessionManager: terminalSessionManager,
-                    findWorktree: findWorktree
+                    showRightPanel: showRightPanelBinding,
+                    changedFileCount: changedFileCountBinding,
+                    isColumnFocused: isFocused
                 )
+            } else {
+                emptyColumnPlaceholder
             }
 
             // Shared runner panel
@@ -92,7 +112,7 @@ struct WorktreeColumnView: View {
                     terminalSessionManager: terminalSessionManager,
                     paneManager: paneManager,
                     showRunnerPanel: showRunnerPanelBinding,
-                    isPaneFocused: isFocused
+                    isColumnFocused: isFocused
                 )
                 .frame(maxWidth: .infinity)
                 .frame(
@@ -102,11 +122,28 @@ struct WorktreeColumnView: View {
                 )
             }
         }
+        // Focus indicator: 2px accent border on all sides for focused column, dim overlay for unfocused
+        .overlay {
+            if paneManager.columns.count > 1 {
+                if isFocused {
+                    RoundedRectangle(cornerRadius: 0)
+                        .stroke(Color.accentColor, lineWidth: 2)
+                        .allowsHitTesting(false)
+                } else {
+                    Color.black.opacity(0.15)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
         .background(currentTheme.background.toColor())
         .environment(\.colorScheme, currentTheme.isDark ? .dark : .light)
         .overlay(
             DropIndicatorView(zone: column.dropZone)
         )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            paneManager.focusedColumnID = column.id
+        }
         .task(id: column.worktreeID) {
             if let wt = worktree {
                 showConfigPendingBanner = wt.project?.needsClaudeConfig == true
@@ -127,7 +164,6 @@ struct WorktreeColumnView: View {
         .onChange(of: worktree?.project?.needsClaudeConfig) { _, newValue in
             if newValue == true {
                 // Auto-launch Claude config if not already running
-                // This covers the race where .task(id:) fired before the @Query refreshed
                 if let wt = worktree, !isClaudeConfigRunning,
                    claudeIntegrationService.canUseClaudeConfig {
                     openClaudeConfigTerminal(worktree: wt)
@@ -138,6 +174,19 @@ struct WorktreeColumnView: View {
                 showConfigPendingBanner = false
             }
         }
+    }
+
+    // MARK: - Empty Column Placeholder
+
+    @ViewBuilder
+    private var emptyColumnPlaceholder: some View {
+        ContentUnavailableView(
+            "No Worktree",
+            systemImage: "rectangle.split.2x1",
+            description: Text("Select a worktree from the sidebar to display it in this column.")
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(currentTheme.background.toColor())
     }
 
     // MARK: - Banners
@@ -194,15 +243,13 @@ struct WorktreeColumnView: View {
             Spacer()
             Button("Run Setup") {
                 showSetupBanner = false
-                // Trigger setup via runner panel
                 column.showRunnerPanel = true
-                // The RunnerPanelView will handle setup when it initializes
                 let runner = RunnerPanelView(
                     worktree: worktree,
                     terminalSessionManager: terminalSessionManager,
                     paneManager: paneManager,
                     showRunnerPanel: showRunnerPanelBinding,
-                    isPaneFocused: isFocused
+                    isColumnFocused: isFocused
                 )
                 runner.runSetup()
             }
@@ -223,11 +270,10 @@ struct WorktreeColumnView: View {
     }
 
     private func openClaudeConfigTerminal(worktree: Worktree) {
-        guard let repoPath = worktree.project?.repoPath,
-              let pane = column.panes.first else { return }
+        guard let repoPath = worktree.project?.repoPath else { return }
         ClaudeConfigHelper.openConfigTerminal(
             terminalSessionManager: terminalSessionManager,
-            paneId: pane.id.uuidString,
+            columnId: column.id.uuidString,
             worktreeId: worktree.path,
             workingDirectory: worktree.path,
             repoPath: repoPath
