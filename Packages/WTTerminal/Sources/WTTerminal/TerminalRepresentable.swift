@@ -299,8 +299,8 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
         let hasModifier = !flags.subtracting([.capsLock, .numericPad, .function]).isEmpty
         guard hasModifier else { return event }
 
-        // Don't intercept Command combos (except Cmd+Backspace) — let system handle copy/paste/etc.
-        if flags.contains(.command) && event.keyCode != 51 {
+        // Don't intercept Command combos — let system handle copy/paste/etc.
+        if flags.contains(.command) {
             return event
         }
 
@@ -333,9 +333,8 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
         return nil // consume the event
     }
 
-    /// Fallback for Command+Backspace when Kitty mode is inactive.
-    /// Sends Ctrl+U (delete to beginning of line) since SwiftTerm's non-overridable
-    /// `doCommand(by:)` doesn't handle the `deleteToBeginningOfLine:` selector.
+    /// Sends Ctrl+U for Command+Backspace (delete to beginning of line) since SwiftTerm's
+    /// non-overridable `doCommand(by:)` doesn't handle the `deleteToBeginningOfLine:` selector.
     public override func performKeyEquivalent(with event: NSEvent) -> Bool {
         // Shift+Enter → LF (newline without submit) when Kitty mode is inactive
         if event.keyCode == 36
@@ -346,7 +345,7 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
             return true
         }
         // Cmd+Backspace → Ctrl+U (delete to beginning of line)
-        if event.keyCode == 51 && event.modifierFlags.contains(.command) && kittyKeyboardLevel == 0 {
+        if event.keyCode == 51 && event.modifierFlags.contains(.command) {
             send(txt: "\u{15}") // Ctrl+U
             return true
         }
