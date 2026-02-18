@@ -126,7 +126,14 @@ struct WorktreeColumnView: View {
         }
         .onChange(of: worktree?.project?.needsClaudeConfig) { _, newValue in
             if newValue == true {
-                showConfigPendingBanner = true
+                // Auto-launch Claude config if not already running
+                // This covers the race where .task(id:) fired before the @Query refreshed
+                if let wt = worktree, !isClaudeConfigRunning,
+                   claudeIntegrationService.canUseClaudeConfig {
+                    openClaudeConfigTerminal(worktree: wt)
+                } else {
+                    showConfigPendingBanner = true
+                }
             } else if newValue == false {
                 showConfigPendingBanner = false
             }
