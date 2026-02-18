@@ -26,11 +26,12 @@ struct AddProjectView: View {
     @State private var sshPort = "22"
 
     // Profile
-    @State private var detectedEnvFiles: [String] = []
-    @State private var selectedEnvFiles: Set<String> = []
+    @State private var filePatterns: [String] = []
+    @State private var activePresets: Set<FilePreset> = []
     @State private var setupCommands: [String] = []
     @State private var terminalStartCommand = ""
     @State private var startClaudeInTerminals = false
+    @State private var customPatternInput = ""
     @State private var runConfigurations: [EditableRunConfig] = []
 
     // Existing worktrees
@@ -265,24 +266,52 @@ struct AddProjectView: View {
                 }
             }
 
-            Section("Environment Files to Copy") {
-                ForEach(detectedEnvFiles, id: \.self) { file in
-                    Toggle(file, isOn: Binding(
-                        get: { selectedEnvFiles.contains(file) },
-                        set: { selected in
-                            if selected { selectedEnvFiles.insert(file) }
-                            else { selectedEnvFiles.remove(file) }
+            Section("Files to Copy") {
+                ForEach(FilePreset.allCases) { preset in
+                    Toggle(isOn: Binding(
+                        get: { activePresets.contains(preset) },
+                        set: { enabled in
+                            if enabled {
+                                activePresets.insert(preset)
+                                if !filePatterns.contains(preset.pattern) {
+                                    filePatterns.append(preset.pattern)
+                                }
+                            } else {
+                                activePresets.remove(preset)
+                                filePatterns.removeAll { $0 == preset.pattern }
+                            }
                         }
-                    ))
+                    )) {
+                        HStack {
+                            Text(preset.displayName)
+                            Text(preset.pattern)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
-                if detectedEnvFiles.isEmpty {
-                    Text("No .env files detected")
-                        .foregroundStyle(.secondary)
+
+                ForEach(customPatterns, id: \.self) { pattern in
+                    HStack {
+                        Text(pattern)
+                            .font(.system(.body, design: .monospaced))
+                        Spacer()
+                        Button(role: .destructive) {
+                            filePatterns.removeAll { $0 == pattern }
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                Button {
-                    browseForEnvFiles()
-                } label: {
-                    Label("Browse...", systemImage: "folder")
+
+                HStack {
+                    TextField("Custom pattern (e.g. config/*.json)", text: $customPatternInput)
+                        .font(.system(.body, design: .monospaced))
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { addCustomPattern() }
+                    Button("Add") { addCustomPattern() }
+                        .disabled(customPatternInput.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
 
@@ -372,10 +401,10 @@ struct AddProjectView: View {
                 }
             }
 
-            if !selectedEnvFiles.isEmpty {
+            if !filePatterns.isEmpty {
                 Section("Files to Copy") {
-                    ForEach(Array(selectedEnvFiles), id: \.self) { file in
-                        Text(file)
+                    ForEach(filePatterns, id: \.self) { pattern in
+                        Text(pattern)
                             .font(.system(.body, design: .monospaced))
                     }
                 }
@@ -538,9 +567,10 @@ struct AddProjectView: View {
             selectedWorktreePaths = Set(filtered.map(\.path))
         }
 
-        // Detect .env files recursively
-        detectedEnvFiles = EnvFileScanner.scan(repoPath: repoPath)
-        selectedEnvFiles = Set(detectedEnvFiles)
+        // Detect file presets that have matches in the repo
+        let detected = FilePreset.detectPresets(in: repoPath)
+        activePresets = Set(detected)
+        filePatterns = detected.map(\.pattern)
 
         // Detect package.json scripts
         let packageJsonURL = URL(fileURLWithPath: "\(repoPath)/package.json")
@@ -737,7 +767,7 @@ struct AddProjectView: View {
 
         // Create or update profile
         let profile = project.profile ?? ProjectProfile()
-        profile.envFilesToCopy = Array(selectedEnvFiles)
+        profile.filesToCopy = filePatterns
         profile.setupCommands = setupCommands.filter { !$0.isEmpty }
         profile.terminalStartCommand = startClaudeInTerminals ? "claude" : (terminalStartCommand.isEmpty ? nil : terminalStartCommand)
 
@@ -790,7 +820,7 @@ struct AddProjectView: View {
             let configService = ConfigService()
             let startCmd: String? = startClaudeInTerminals ? "claude" : (terminalStartCommand.isEmpty ? nil : terminalStartCommand)
             let config = ProjectConfig(
-                envFilesToCopy: Array(selectedEnvFiles),
+                filesToCopy: filePatterns,
                 setupCommands: setupCommands.filter { !$0.isEmpty },
                 runConfigurations: runConfigurations
                     .enumerated()
@@ -826,15 +856,17 @@ struct AddProjectView: View {
         }
     }
 
-    private func browseForEnvFiles() {
-        let (detected, selected) = FileBrowseHelper.browseForEnvFiles(
-            repoPath: repoPath,
-            existing: detectedEnvFiles
-        )
-        detectedEnvFiles = detected
-        for file in selected {
-            selectedEnvFiles.insert(file)
-        }
+    /// Patterns that aren't covered by any preset toggle.
+    private var customPatterns: [String] {
+        let presetPatterns = Set(FilePreset.allCases.map(\.pattern))
+        return filePatterns.filter { !presetPatterns.contains($0) }
+    }
+
+    private func addCustomPattern() {
+        let pattern = customPatternInput.trimmingCharacters(in: .whitespaces)
+        guard !pattern.isEmpty, !filePatterns.contains(pattern) else { return }
+        filePatterns.append(pattern)
+        customPatternInput = ""
     }
 
     private func enableClaudeIntegration() {

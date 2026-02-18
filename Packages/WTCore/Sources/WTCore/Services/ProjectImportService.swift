@@ -68,7 +68,7 @@ public struct ProjectImportService {
             project.needsClaudeConfig = false
 
             if let profile = project.profile {
-                profile.envFilesToCopy = config.envFilesToCopy
+                profile.filesToCopy = config.filesToCopy
                 profile.setupCommands = config.setupCommands
                 profile.terminalStartCommand = config.terminalStartCommand
 
@@ -125,7 +125,7 @@ public struct ProjectImportService {
             )
 
             let profile = ProjectProfile()
-            profile.envFilesToCopy = config.envFilesToCopy
+            profile.filesToCopy = config.filesToCopy
             profile.setupCommands = config.setupCommands
             profile.terminalStartCommand = config.terminalStartCommand
 

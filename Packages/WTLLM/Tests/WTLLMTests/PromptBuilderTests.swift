@@ -56,12 +56,12 @@ struct PromptBuilderTests {
 
         let properties = schema?["properties"] as? [String: Any]
         #expect(properties != nil)
-        #expect(properties?["envFilesToCopy"] != nil)
+        #expect(properties?["filesToCopy"] != nil)
         #expect(properties?["setupCommands"] != nil)
         #expect(properties?["runConfigurations"] != nil)
 
         let required = schema?["required"] as? [String]
-        #expect(required?.contains("envFilesToCopy") == true)
+        #expect(required?.contains("filesToCopy") == true)
         #expect(required?.contains("setupCommands") == true)
         #expect(required?.contains("runConfigurations") == true)
     }

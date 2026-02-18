@@ -21,15 +21,15 @@ enum FileBrowseHelper {
         return url.path
     }
 
-    /// Opens an `NSOpenPanel` to select environment files, returning
-    /// (newFiles, selectedFiles) as relative paths from `repoPath`.
+    /// Opens an `NSOpenPanel` to select files or directories, returning
+    /// (allPaths, newlySelected) as relative paths from `repoPath`.
     @MainActor
-    static func browseForEnvFiles(repoPath: String, existing: [String]) -> (detected: [String], selected: [String]) {
+    static func browseForFiles(repoPath: String, existing: [String]) -> (detected: [String], selected: [String]) {
         let panel = NSOpenPanel()
-        panel.canChooseDirectories = false
+        panel.canChooseDirectories = true
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = true
-        panel.message = "Select environment files to copy to new worktrees"
+        panel.message = "Select files or directories to copy to new worktrees"
         panel.directoryURL = URL(fileURLWithPath: repoPath)
 
         guard panel.runModal() == .OK else { return (existing, []) }

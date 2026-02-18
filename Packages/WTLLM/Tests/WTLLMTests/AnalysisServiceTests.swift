@@ -60,7 +60,7 @@ struct AnalysisServiceTests {
 
     private func makeSuccessfulResult() throws -> LLMToolCallResult {
         let analysis = ProjectAnalysis(
-            envFilesToCopy: [".env"],
+            filesToCopy: [".env"],
             setupCommands: ["npm install"],
             runConfigurations: [
                 .init(name: "Dev", command: "npm run dev", port: 3000, autoStart: true)

@@ -5,7 +5,7 @@ import SwiftData
 public final class ProjectProfile {
     public var project: Project?
 
-    public var envFilesToCopy: [String] = []
+    public var filesToCopy: [String] = []
     public var setupCommands: [String] = []
     public var terminalStartCommand: String?
     public var confirmSetupRerun: Bool = true

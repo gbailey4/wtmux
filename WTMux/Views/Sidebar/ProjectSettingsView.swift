@@ -30,7 +30,7 @@ struct ProjectSettingsView: View {
     // Profile fields
     @State private var runConfigurations: [EditableRunConfig]
     @State private var setupCommands: [String]
-    @State private var envFilesToCopy: [String]
+    @State private var filesToCopy: [String]
     @State private var terminalStartCommand: String
     @State private var startClaudeInTerminals: Bool
     @State private var confirmSetupRerun: Bool
@@ -55,7 +55,7 @@ struct ProjectSettingsView: View {
         // Initialize profile fields
         let profile = project.profile
         _setupCommands = State(initialValue: profile?.setupCommands ?? [])
-        _envFilesToCopy = State(initialValue: profile?.envFilesToCopy ?? [])
+        _filesToCopy = State(initialValue: profile?.filesToCopy ?? [])
         _terminalStartCommand = State(initialValue: profile?.terminalStartCommand ?? "")
         _startClaudeInTerminals = State(initialValue: profile?.terminalStartCommand == "claude")
         _confirmSetupRerun = State(initialValue: profile?.confirmSetupRerun ?? true)
@@ -195,14 +195,14 @@ struct ProjectSettingsView: View {
                     }
                 }
 
-                Section("Environment Files") {
-                    ForEach(Array(envFilesToCopy.enumerated()), id: \.offset) { index, _ in
+                Section("Files to Copy") {
+                    ForEach(Array(filesToCopy.enumerated()), id: \.offset) { index, _ in
                         HStack {
-                            TextField("File path", text: $envFilesToCopy[index])
+                            TextField("Pattern (e.g. .env*, .claude/)", text: $filesToCopy[index])
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(.body, design: .monospaced))
                             Button(role: .destructive) {
-                                envFilesToCopy.remove(at: index)
+                                filesToCopy.remove(at: index)
                             } label: {
                                 Image(systemName: "minus.circle")
                             }
@@ -211,9 +211,9 @@ struct ProjectSettingsView: View {
                         }
                     }
                     Button {
-                        browseForEnvFiles()
+                        filesToCopy.append("")
                     } label: {
-                        Label("Add File", systemImage: "plus")
+                        Label("Add Pattern", systemImage: "plus")
                     }
                 }
 
@@ -359,14 +359,6 @@ struct ProjectSettingsView: View {
         }
     }
 
-    private func browseForEnvFiles() {
-        let (detected, _) = FileBrowseHelper.browseForEnvFiles(
-            repoPath: repoPath,
-            existing: envFilesToCopy
-        )
-        envFilesToCopy = detected
-    }
-
     @ViewBuilder
     private var configureWithClaudeButton: some View {
         if project.worktrees.isEmpty {
@@ -402,7 +394,7 @@ struct ProjectSettingsView: View {
             Task {
                 let configService = ConfigService()
                 if let config = await configService.readConfig(forRepo: repoPath) {
-                    envFilesToCopy = config.envFilesToCopy
+                    filesToCopy = config.filesToCopy
                     setupCommands = config.setupCommands
                     if config.terminalStartCommand == "claude" {
                         startClaudeInTerminals = true
@@ -453,7 +445,7 @@ struct ProjectSettingsView: View {
             return p
         }()
 
-        profile.envFilesToCopy = envFilesToCopy.filter { !$0.isEmpty }
+        profile.filesToCopy = filesToCopy.filter { !$0.isEmpty }
         profile.setupCommands = setupCommands.filter { !$0.isEmpty }
         profile.confirmSetupRerun = confirmSetupRerun
         profile.terminalStartCommand = startClaudeInTerminals ? "claude" : (terminalStartCommand.isEmpty ? nil : terminalStartCommand)
@@ -482,7 +474,7 @@ struct ProjectSettingsView: View {
             let configService = ConfigService()
             let startCmd: String? = startClaudeInTerminals ? "claude" : (terminalStartCommand.isEmpty ? nil : terminalStartCommand)
             let config = ProjectConfig(
-                envFilesToCopy: envFilesToCopy.filter { !$0.isEmpty },
+                filesToCopy: filesToCopy.filter { !$0.isEmpty },
                 setupCommands: setupCommands.filter { !$0.isEmpty },
                 runConfigurations: runConfigurations
                     .enumerated()

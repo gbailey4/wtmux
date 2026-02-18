@@ -7,7 +7,7 @@ public enum PromptBuilder {
         and the contents of key config files.
 
         Be precise and conservative:
-        - Only suggest env files that actually exist (listed in the directory tree or referenced in configs)
+        - Only suggest files/directories that actually exist (listed in the directory tree or referenced in configs)
         - Only suggest setup commands you are confident are correct for the project
         - Only suggest run configurations for scripts/commands you can see defined
         - For ports, only include a port number if you can determine it from the config
@@ -48,10 +48,10 @@ public enum PromptBuilder {
         let schema: [String: Any] = [
             "type": "object",
             "properties": [
-                "envFilesToCopy": [
+                "filesToCopy": [
                     "type": "array",
                     "items": ["type": "string"],
-                    "description": "Relative paths to env files that should be copied to new worktrees (e.g. .env, .env.local)"
+                    "description": "Glob patterns or paths for files/directories to copy to new worktrees (e.g. '.env*', '.claude/', '.vscode/')"
                 ],
                 "setupCommands": [
                     "type": "array",
@@ -97,7 +97,7 @@ public enum PromptBuilder {
                     "description": "Any additional insights about the project setup that might be useful"
                 ]
             ],
-            "required": ["envFilesToCopy", "setupCommands", "runConfigurations"]
+            "required": ["filesToCopy", "setupCommands", "runConfigurations"]
         ]
 
         // Safe to force-try: the dictionary above is a hardcoded JSON-compatible literal.

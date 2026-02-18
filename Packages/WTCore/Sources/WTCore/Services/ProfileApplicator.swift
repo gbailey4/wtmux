@@ -6,30 +6,33 @@ private let logger = Logger(subsystem: "com.wtmux", category: "ProfileApplicator
 public final class ProfileApplicator: Sendable {
     public init() {}
 
-    /// Copies env files from the main repo to a worktree directory.
-    public func applyEnvFiles(
-        envFiles: [String],
+    /// Copies files matching the given patterns from the main repo to a worktree directory.
+    /// Patterns are expanded via `FilePatternMatcher` before copying.
+    public func copyFiles(
+        patterns: [String],
         repoPath: String,
         worktreePath: String
     ) {
+        let files = FilePatternMatcher.match(patterns: patterns, in: repoPath)
         let fm = FileManager.default
-        for envFile in envFiles {
+
+        for file in files {
             let source = URL(fileURLWithPath: repoPath)
-                .appendingPathComponent(envFile)
+                .appendingPathComponent(file)
             let destination = URL(fileURLWithPath: worktreePath)
-                .appendingPathComponent(envFile)
+                .appendingPathComponent(file)
 
             guard fm.fileExists(atPath: source.path) else {
-                logger.warning("Env file not found at source, skipping: \(envFile)")
+                logger.warning("File not found at source, skipping: \(file)")
                 continue
             }
 
-            // Create intermediate directories if the env file is nested
+            // Create intermediate directories if the file is nested
             let destDir = destination.deletingLastPathComponent()
             do {
                 try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
             } catch {
-                logger.error("Failed to create directory for env file '\(envFile)': \(error.localizedDescription)")
+                logger.error("Failed to create directory for '\(file)': \(error.localizedDescription)")
                 continue
             }
 
@@ -40,7 +43,7 @@ public final class ProfileApplicator: Sendable {
                 }
                 try fm.copyItem(at: source, to: destination)
             } catch {
-                logger.error("Failed to copy env file '\(envFile)': \(error.localizedDescription)")
+                logger.error("Failed to copy '\(file)': \(error.localizedDescription)")
             }
         }
     }

@@ -211,12 +211,12 @@ struct CreateWorktreeView: View {
                     }
                 }
 
-                // Apply profile: copy env files from main repo to new worktree
-                let envFiles = project.profile?.envFilesToCopy ?? []
-                if !envFiles.isEmpty {
+                // Apply profile: copy matched files from main repo to new worktree
+                let filePatterns = project.profile?.filesToCopy ?? []
+                if !filePatterns.isEmpty {
                     let applicator = ProfileApplicator()
-                    applicator.applyEnvFiles(
-                        envFiles: envFiles,
+                    applicator.copyFiles(
+                        patterns: filePatterns,
                         repoPath: project.repoPath,
                         worktreePath: worktreePath
                     )

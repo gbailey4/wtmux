@@ -49,7 +49,7 @@ public enum ProjectAnalyzer {
         let repoURL = URL(fileURLWithPath: repoPath)
         let projectName = repoURL.lastPathComponent
 
-        let envFiles = EnvFileScanner.scan(repoPath: repoPath)
+        let envFiles = FilePatternMatcher.match(patterns: [".env*"], in: repoPath)
         let packageManager = detectPackageManager(repoPath: repoPath)
         let scripts = parseScripts(repoPath: repoPath, packageManager: packageManager)
         let defaultBranch = detectDefaultBranch(repoPath: repoPath)

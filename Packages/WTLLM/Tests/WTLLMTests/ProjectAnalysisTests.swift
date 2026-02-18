@@ -9,7 +9,7 @@ struct ProjectAnalysisTests {
     func decodesFullJSON() throws {
         let json = """
         {
-            "envFilesToCopy": [".env", ".env.local"],
+            "filesToCopy": [".env", ".env.local"],
             "setupCommands": ["pnpm install"],
             "runConfigurations": [
                 {
@@ -27,7 +27,7 @@ struct ProjectAnalysisTests {
         let data = Data(json.utf8)
         let analysis = try JSONDecoder().decode(ProjectAnalysis.self, from: data)
 
-        #expect(analysis.envFilesToCopy == [".env", ".env.local"])
+        #expect(analysis.filesToCopy == [".env", ".env.local"])
         #expect(analysis.setupCommands == ["pnpm install"])
         #expect(analysis.runConfigurations.count == 1)
         #expect(analysis.runConfigurations[0].name == "Dev Server")
@@ -43,7 +43,7 @@ struct ProjectAnalysisTests {
     func decodesMinimalJSON() throws {
         let json = """
         {
-            "envFilesToCopy": [],
+            "filesToCopy": [],
             "setupCommands": [],
             "runConfigurations": []
         }
@@ -51,7 +51,7 @@ struct ProjectAnalysisTests {
         let data = Data(json.utf8)
         let analysis = try JSONDecoder().decode(ProjectAnalysis.self, from: data)
 
-        #expect(analysis.envFilesToCopy.isEmpty)
+        #expect(analysis.filesToCopy.isEmpty)
         #expect(analysis.setupCommands.isEmpty)
         #expect(analysis.runConfigurations.isEmpty)
         #expect(analysis.terminalStartCommand == nil)
@@ -91,7 +91,7 @@ struct ProjectAnalysisTests {
     @Test("Round-trips through encode/decode")
     func roundTrips() throws {
         let original = ProjectAnalysis(
-            envFilesToCopy: [".env"],
+            filesToCopy: [".env"],
             setupCommands: ["make setup"],
             runConfigurations: [
                 .init(name: "Server", command: "make serve", port: 8080, autoStart: true)

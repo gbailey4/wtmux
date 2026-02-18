@@ -55,13 +55,14 @@ struct ToolHandlers: Sendable {
                         "type": .string("string"),
                         "description": .string("Absolute path to the git repository root"),
                     ]),
-                    "envFilesToCopy": .object([
+                    "filesToCopy": .object([
                         "type": .string("array"),
                         "items": .object(["type": .string("string")]),
                         "description": .string(
-                            "Relative paths to env files to copy to new worktrees (e.g. .env, .env.local). "
+                            "Glob patterns or paths for files/directories to copy to new worktrees "
+                            + "(e.g. '.env*', '.claude/', '.vscode/', 'config.json'). "
                             + "IMPORTANT: Only include files that actually exist on the local filesystem. "
-                            + "Do NOT check git remote, git ls-files, or .gitignore to guess env file names. "
+                            + "Do NOT check git remote, git ls-files, or .gitignore to guess file names. "
                             + "If you haven't confirmed a file exists locally, do not include it."
                         ),
                     ]),
@@ -259,7 +260,8 @@ struct ToolHandlers: Sendable {
             )
         }
 
-        let envFiles = arguments?["envFilesToCopy"]?.arrayValue?.compactMap(\.stringValue) ?? []
+        let filesToCopy = (arguments?["filesToCopy"]?.arrayValue?.compactMap(\.stringValue))
+            ?? (arguments?["envFilesToCopy"]?.arrayValue?.compactMap(\.stringValue) ?? [])
         let setupCommands = arguments?["setupCommands"]?.arrayValue?.compactMap(\.stringValue) ?? []
         let terminalStartCommand: String? = {
             if arguments?["startClaudeInTerminals"]?.boolValue == true {
@@ -301,7 +303,7 @@ struct ToolHandlers: Sendable {
         }
 
         let config = ProjectConfig(
-            envFilesToCopy: envFiles,
+            filesToCopy: filesToCopy,
             setupCommands: setupCommands,
             runConfigurations: runConfigs,
             terminalStartCommand: terminalStartCommand,
@@ -339,8 +341,8 @@ struct ToolHandlers: Sendable {
         )
 
         var summary = "Configured \(repoPath):\n"
-        if !envFiles.isEmpty {
-            summary += "- Env files: \(envFiles.joined(separator: ", "))\n"
+        if !filesToCopy.isEmpty {
+            summary += "- Files to copy: \(filesToCopy.joined(separator: ", "))\n"
         }
         if !setupCommands.isEmpty {
             summary += "- Setup commands: \(setupCommands.count)\n"
