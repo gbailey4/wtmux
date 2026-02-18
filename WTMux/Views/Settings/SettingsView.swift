@@ -6,6 +6,7 @@ struct SettingsView: View {
     @AppStorage("defaultShell") private var defaultShell = Shell.default
     @AppStorage("terminalFontSize") private var terminalFontSize = 13.0
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
+    @AppStorage("terminalScrollbackLines") private var terminalScrollbackLines = 5000
 
     @State private var customEditors = ExternalEditor.customEditors
     @State private var hiddenEditorIds = ExternalEditor.hiddenEditorIds
@@ -77,6 +78,17 @@ struct SettingsView: View {
                     Slider(value: $terminalFontSize, in: 10...24, step: 1)
                     Text("\(Int(terminalFontSize))pt")
                         .monospacedDigit()
+                }
+
+                HStack {
+                    Text("Scrollback")
+                    TextField("", value: $terminalScrollbackLines, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 80)
+                    Text("lines")
+                        .foregroundStyle(.secondary)
+                    Stepper("", value: $terminalScrollbackLines, in: 500...50_000, step: 500)
+                        .labelsHidden()
                 }
             }
 

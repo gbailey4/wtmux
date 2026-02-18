@@ -85,6 +85,16 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
     /// Local event monitor for intercepting key events when Kitty mode is active.
     private var keyEventMonitor: Any?
 
+    /// Local event monitor for Shift+click mouse reporting bypass.
+    private var flagsEventMonitor: Any?
+
+    /// Whether we suppressed mouse reporting due to Shift being held.
+    private var didSuppressMouseReporting = false
+
+    /// Buffered PTY data received while Shift is held (selection in progress).
+    /// Prevents SwiftTerm's `feedPrepare()` from clearing the selection.
+    private var shiftSelectionDataBuffer: [[UInt8]] = []
+
     public init(workingDirectory: String, shellPath: String, initialCommand: String? = nil, deferExecution: Bool = false) {
         self.workingDirectory = workingDirectory
         self.shellPath = shellPath
@@ -92,11 +102,19 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
         self.deferExecution = deferExecution
         super.init(frame: .zero)
 
+        let scrollback = max(500, min(50_000, UserDefaults.standard.object(forKey: "terminalScrollbackLines") as? Int ?? 5_000))
+        getTerminal().changeHistorySize(scrollback)
+
         // Install key event monitor eagerly — viewDidMoveToWindow may not fire
         // reliably in SwiftUI's NSViewRepresentable lifecycle. The firstResponder
         // guard in handleKeyEventForKitty prevents stealing events from other views.
         keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.handleKeyEventForKitty(event) ?? event
+        }
+
+        flagsEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.handleFlagsChangedForMouseBypass(event)
+            return event
         }
     }
 
@@ -136,6 +154,14 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
     ///
     /// Pattern: `ESC [ [<>?] [0-9;]* u`
     open override func dataReceived(slice: ArraySlice<UInt8>) {
+        if didSuppressMouseReporting {
+            shiftSelectionDataBuffer.append(Array(slice))
+            return
+        }
+        processReceivedData(slice)
+    }
+
+    private func processReceivedData(_ slice: ArraySlice<UInt8>) {
         let (filtered, commands) = Self.filterKittyKeyboardSequences(slice)
 
         for command in commands {
@@ -159,6 +185,14 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
                 let arraySlice = Array(buffer)[...]
                 super.dataReceived(slice: arraySlice)
             }
+        }
+    }
+
+    private func flushShiftSelectionBuffer() {
+        let buffered = shiftSelectionDataBuffer
+        shiftSelectionDataBuffer.removeAll()
+        for data in buffered {
+            processReceivedData(data[...])
         }
     }
 
@@ -237,6 +271,24 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
         return (filtered: output, commands: commands)
     }
 
+    // MARK: - Shift+click mouse reporting bypass
+
+    /// Toggles `allowMouseReporting` off while Shift is held so SwiftTerm's
+    /// built-in selection code runs instead of forwarding clicks to the app.
+    /// Standard behavior in iTerm2, WezTerm, and Kitty.
+    private func handleFlagsChangedForMouseBypass(_ event: NSEvent) {
+        guard window?.firstResponder === self else { return }
+        let shiftPressed = event.modifierFlags.contains(.shift)
+        if shiftPressed && allowMouseReporting {
+            allowMouseReporting = false
+            didSuppressMouseReporting = true
+        } else if !shiftPressed && didSuppressMouseReporting {
+            allowMouseReporting = true
+            didSuppressMouseReporting = false
+            flushShiftSelectionBuffer()
+        }
+    }
+
     // MARK: - Kitty keyboard input encoding
 
     /// Install/remove an NSEvent local monitor to intercept key events when Kitty
@@ -245,10 +297,21 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
     /// before SwiftTerm's non-overridable `keyDown` processes them.
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        // Clean up the monitor when removed from the window hierarchy.
-        if window == nil, let monitor = keyEventMonitor {
-            NSEvent.removeMonitor(monitor)
-            keyEventMonitor = nil
+        // Clean up monitors when removed from the window hierarchy.
+        if window == nil {
+            if let monitor = keyEventMonitor {
+                NSEvent.removeMonitor(monitor)
+                keyEventMonitor = nil
+            }
+            if let monitor = flagsEventMonitor {
+                NSEvent.removeMonitor(monitor)
+                flagsEventMonitor = nil
+            }
+            if didSuppressMouseReporting {
+                allowMouseReporting = true
+                didSuppressMouseReporting = false
+                flushShiftSelectionBuffer()
+            }
         }
     }
 
