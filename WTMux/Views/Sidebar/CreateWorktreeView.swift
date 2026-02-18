@@ -186,6 +186,7 @@ struct CreateWorktreeView: View {
             }
 
             do {
+                try? await git.worktreePrune()
                 let existingWorktrees = (try? await git.worktreeList()) ?? []
                 let existingPaths = Set(existingWorktrees.map(\.path))
                 let worktreePath = WorktreePathResolver.resolve(

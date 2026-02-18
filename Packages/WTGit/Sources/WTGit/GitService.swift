@@ -106,6 +106,16 @@ public actor GitService {
         }
     }
 
+    public func worktreePrune() async throws {
+        let result = try await transport.execute(
+            [gitPath, "worktree", "prune"],
+            in: repoPath
+        )
+        guard result.succeeded else {
+            throw GitError.commandFailed(result.stderr)
+        }
+    }
+
     public func worktreeRemove(path: String, force: Bool = false) async throws {
         var args = [gitPath, "worktree", "remove", path]
         if force { args.insert("--force", at: 3) }
