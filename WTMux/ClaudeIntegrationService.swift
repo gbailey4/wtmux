@@ -100,7 +100,7 @@ final class ClaudeIntegrationService {
             "args": [] as [String],
             "type": "stdio",
         ]
-        mcpServers["wtmux"] = entry
+        mcpServers[AppIdentity.mcpServerName] = entry
         config["mcpServers"] = mcpServers
 
         let data = try JSONSerialization.data(
@@ -116,7 +116,7 @@ final class ClaudeIntegrationService {
             return
         }
 
-        mcpServers.removeValue(forKey: "wtmux")
+        mcpServers.removeValue(forKey: AppIdentity.mcpServerName)
         config["mcpServers"] = mcpServers
 
         if let data = try? JSONSerialization.data(
@@ -132,7 +132,7 @@ final class ClaudeIntegrationService {
               let mcpServers = config["mcpServers"] as? [String: Any] else {
             return false
         }
-        return mcpServers["wtmux"] != nil
+        return mcpServers[AppIdentity.mcpServerName] != nil
     }
 
     // MARK: - Hooks Registration

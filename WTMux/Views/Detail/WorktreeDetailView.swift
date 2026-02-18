@@ -143,10 +143,7 @@ struct WorktreeDetailView: View {
                     }
                 }
             }
-            .padding(4)
-            .background(Color(nsColor: currentTheme.background.toNSColor()))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-            .padding(2)
+            .background(currentTheme.background.toColor())
         }
     }
 
@@ -207,7 +204,7 @@ struct WorktreeDetailView: View {
                 paneManager.splitSameWorktree()
             }
         }
-        .background(.bar)
+        .background(currentTheme.chromeBackground.toColor())
     }
 
     @ViewBuilder

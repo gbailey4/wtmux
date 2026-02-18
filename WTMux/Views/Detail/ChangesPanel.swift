@@ -2,6 +2,7 @@ import SwiftUI
 import WTCore
 import WTGit
 import WTDiff
+import WTTerminal
 import WTTransport
 struct SelectedFile: Equatable {
     let groupId: String
@@ -47,6 +48,8 @@ struct ChangesPanel: View {
     let paneID: UUID
     @Binding var changedFileCount: Int
 
+    @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
+
     @State private var diffViewMode: DiffViewMode = .byCommit
     @State private var changeGroups: [ChangeGroup] = []
     @State private var diffCache: [String: [DiffFile]] = [:]
@@ -54,6 +57,10 @@ struct ChangesPanel: View {
     @State private var expandedGroups: Set<String> = ["working-changes"]
     @State private var isLoading = false
     @State private var commitFileCache: [String: [GitFileStatus]] = [:]
+
+    private var currentTheme: TerminalTheme {
+        TerminalThemes.theme(forId: terminalThemeId)
+    }
 
     private var diffWindowFile: DiffFile? {
         paneManager.windows.first(where: {
@@ -127,7 +134,7 @@ struct ChangesPanel: View {
             .help("Refresh")
         }
         .padding(8)
-        .background(.bar)
+        .background(currentTheme.chromeBackground.toColor())
     }
 
     // MARK: - Outline

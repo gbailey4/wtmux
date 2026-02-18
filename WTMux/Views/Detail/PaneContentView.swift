@@ -9,6 +9,12 @@ struct PaneContentView: View {
     let terminalSessionManager: TerminalSessionManager
     let findWorktree: (String) -> Worktree?
 
+    @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
+
+    private var currentTheme: TerminalTheme {
+        TerminalThemes.theme(forId: terminalThemeId)
+    }
+
     private var isFocused: Bool {
         paneManager.focusedPaneID == pane.id
     }
@@ -81,5 +87,6 @@ struct PaneContentView: View {
             description: Text("Select a worktree from the sidebar to display it in this pane.")
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(currentTheme.background.toColor())
     }
 }

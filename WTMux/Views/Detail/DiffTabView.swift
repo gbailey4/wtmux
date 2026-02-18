@@ -71,6 +71,7 @@ struct DiffTabView: View {
             paneManager.closeDiffTab(windowID: window.id)
             return .handled
         }
+        .background(currentTheme.background.toColor())
     }
 
     @ViewBuilder

@@ -32,6 +32,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.grahampark.wtmux
         WTMUX_DISPLAY_NAME: WTMux Dev
         WTMUX_URL_SCHEME: wtmux
+        WTMUX_MCP_SERVER_NAME: wtmux
+        WTMUX_NOTIFICATION_PREFIX: com.grahampark.wtmux
         MARKETING_VERSION: 0.1.0
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: 6.0
@@ -68,6 +70,8 @@ targets:
         CFBundlePackageType: APPL
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         LSApplicationCategoryType: public.app-category.developer-tools
+        WTMuxMCPServerName: $(WTMUX_MCP_SERVER_NAME)
+        WTMuxNotificationPrefix: $(WTMUX_NOTIFICATION_PREFIX)
         CFBundleURLTypes:
           - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER)
             CFBundleURLSchemes:
@@ -117,6 +121,8 @@ targets:
         PRODUCT_NAME: "Stable"
         WTMUX_DISPLAY_NAME: Stable
         WTMUX_URL_SCHEME: wtmux-stable
+        WTMUX_MCP_SERVER_NAME: wtmux-stable
+        WTMUX_NOTIFICATION_PREFIX: com.grahampark.wtmux.stable
         MARKETING_VERSION: 0.1.0
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: 6.0
@@ -153,6 +159,8 @@ targets:
         CFBundlePackageType: APPL
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         LSApplicationCategoryType: public.app-category.developer-tools
+        WTMuxMCPServerName: $(WTMUX_MCP_SERVER_NAME)
+        WTMuxNotificationPrefix: $(WTMUX_NOTIFICATION_PREFIX)
         CFBundleURLTypes:
           - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER)
             CFBundleURLSchemes:

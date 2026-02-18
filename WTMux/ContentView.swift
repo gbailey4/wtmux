@@ -13,7 +13,7 @@ final class ProjectImportObserver {
 
     init() {
         DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.grahampark.wtmux.importProject"),
+            forName: AppIdentity.importProjectNotification,
             object: nil,
             queue: .main
         ) { [weak self] notification in
@@ -38,7 +38,6 @@ struct ContentView: View {
     @Query(sort: \Project.sortOrder) private var projects: [Project]
 
     @State private var showingAddProject = false
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var terminalSessionManager = TerminalSessionManager()
     @Environment(ClaudeStatusManager.self) private var claudeStatusManager
     @State private var importObserver = ProjectImportObserver()
@@ -50,11 +49,17 @@ struct ContentView: View {
     @State private var showCloseTabAlert = false
     @State private var pendingCloseSessionId: String?
     @State private var pendingPostCloseAction: (() -> Void)?
+    @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
+    @State private var sidebarCollapsed = false
     @State private var showCloseWindowAlert = false
     @State private var pendingCloseWindowID: UUID?
     @State private var renamingWindowID: UUID?
     @State private var windowRenameText: String = ""
     @FocusState private var isWindowRenameFocused: Bool
+
+    private var currentTheme: TerminalTheme {
+        TerminalThemes.theme(forId: terminalThemeId)
+    }
 
     private var selectedWorktreeID: Binding<String?> {
         Binding(
@@ -89,7 +94,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        HSplitView {
             SidebarView(
                 projects: projects,
                 paneManager: paneManager,
@@ -97,11 +102,22 @@ struct ContentView: View {
                 terminalSessionManager: terminalSessionManager,
                 claudeStatusManager: claudeStatusManager
             )
-            .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 320)
-        } detail: {
+            .frame(minWidth: sidebarCollapsed ? 0 : 200, idealWidth: 240, maxWidth: 320)
+            .background { SidebarCollapser(isCollapsed: sidebarCollapsed) }
+
             detailContent
+                .padding(.leading, 1)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    sidebarCollapsed.toggle()
+                } label: {
+                    Image(systemName: "sidebar.left")
+                }
+                .help("Toggle Sidebar")
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     showRightPanel.wrappedValue.toggle()
@@ -399,6 +415,8 @@ struct ContentView: View {
                     description: Text("Select a worktree from the sidebar to get started.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(currentTheme.background.toColor())
+                .environment(\.colorScheme, currentTheme.isDark ? .dark : .light)
                 .overlay {
                     WorktreeDropZone { worktreeID in
                         paneManager.openWorktreeInNewWindow(worktreeID: worktreeID)
@@ -425,7 +443,8 @@ struct ContentView: View {
             .help("New Window")
             Spacer()
         }
-        .background(.bar)
+        .background(currentTheme.chromeBackground.toColor())
+        .environment(\.colorScheme, currentTheme.isDark ? .dark : .light)
     }
 
     @ViewBuilder
@@ -614,6 +633,83 @@ struct ContentView: View {
             }
         }
         return nil
+    }
+}
+
+// MARK: - SidebarCollapser
+
+/// Programmatically collapses/expands the sidebar by calling NSSplitView's
+/// `setPosition(_:ofDividerAt:)`. Placed as a `.background` on the sidebar
+/// so its NSView is a descendant of the NSSplitView.
+/// Also observes sidebar frame changes to persist the user's preferred width.
+private struct SidebarCollapser: NSViewRepresentable {
+    var isCollapsed: Bool
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            guard let splitView = findSplitView(from: nsView) else { return }
+            context.coordinator.installObserver(on: splitView)
+            if isCollapsed {
+                splitView.setPosition(0, ofDividerAt: 0)
+            } else if !context.coordinator.hasRestoredWidth
+                        || splitView.subviews.first.map({ $0.frame.width < 1 }) == true {
+                context.coordinator.hasRestoredWidth = true
+                let saved = UserDefaults.standard.double(forKey: "sidebarWidth")
+                let width = (200...320).contains(saved) ? saved : 240
+                splitView.setPosition(width, ofDividerAt: 0)
+            }
+        }
+    }
+
+    private func findSplitView(from view: NSView) -> NSSplitView? {
+        var current: NSView? = view.superview
+        while let v = current {
+            if let split = v as? NSSplitView { return split }
+            current = v.superview
+        }
+        return nil
+    }
+
+    final class Coordinator {
+        var hasRestoredWidth = false
+        private var observation: NSObjectProtocol?
+        private var debounceWork: DispatchWorkItem?
+
+        func installObserver(on splitView: NSSplitView) {
+            guard observation == nil, let sidebarView = splitView.subviews.first else { return }
+            sidebarView.postsFrameChangedNotifications = true
+            observation = NotificationCenter.default.addObserver(
+                forName: NSView.frameDidChangeNotification,
+                object: sidebarView,
+                queue: .main
+            ) { [weak self] notification in
+                guard let view = notification.object as? NSView else { return }
+                let width = view.frame.width
+                if width >= 200 {
+                    self?.debounceSave(width: width)
+                }
+            }
+        }
+
+        private func debounceSave(width: CGFloat) {
+            debounceWork?.cancel()
+            let item = DispatchWorkItem {
+                UserDefaults.standard.set(Double(width), forKey: "sidebarWidth")
+            }
+            debounceWork = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
+        }
+
+        deinit {
+            if let observation {
+                NotificationCenter.default.removeObserver(observation)
+            }
+            debounceWork?.cancel()
+        }
     }
 }
 

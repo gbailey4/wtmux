@@ -189,6 +189,8 @@ struct SidebarView: View {
             projectDropTargetRepoPath = isTargeted ? "__bottom__" : nil
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(.windowBackground)
         .safeAreaInset(edge: .bottom) {
             HStack {
                 Button {

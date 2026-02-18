@@ -68,4 +68,22 @@ public struct TerminalTheme: Sendable, Codable, Hashable, Identifiable {
         let luminance = 0.299 * Double(background.r) + 0.587 * Double(background.g) + 0.114 * Double(background.b)
         return luminance < 128
     }
+
+    /// A slightly lighter (dark themes) or darker (light themes) variant of the background,
+    /// for use on tab bars and headers.
+    public var chromeBackground: ThemeColor {
+        if isDark {
+            return ThemeColor(
+                UInt8(min(Int(background.r) + 12, 255)),
+                UInt8(min(Int(background.g) + 12, 255)),
+                UInt8(min(Int(background.b) + 12, 255))
+            )
+        } else {
+            return ThemeColor(
+                UInt8(max(Int(background.r) - 10, 0)),
+                UInt8(max(Int(background.g) - 10, 0)),
+                UInt8(max(Int(background.b) - 10, 0))
+            )
+        }
+    }
 }

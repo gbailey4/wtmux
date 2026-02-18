@@ -37,6 +37,10 @@
 	<string>public.app-category.developer-tools</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>WTMuxMCPServerName</key>
+	<string>$(WTMUX_MCP_SERVER_NAME)</string>
+	<key>WTMuxNotificationPrefix</key>
+	<string>$(WTMUX_NOTIFICATION_PREFIX)</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>

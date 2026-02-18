@@ -171,7 +171,7 @@ struct RunnerPanelView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(.bar)
+        .background(currentTheme.chromeBackground.toColor())
     }
 
     @ViewBuilder
@@ -305,7 +305,7 @@ struct RunnerPanelView: View {
             }
         }
         .padding(.trailing, 4)
-        .background(.bar)
+        .background(currentTheme.chromeBackground.toColor())
     }
 
     @ViewBuilder
@@ -538,7 +538,7 @@ struct RunnerPanelView: View {
             }
             Spacer()
         }
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .background(currentTheme.background.toColor().opacity(0.7))
     }
 
     @ViewBuilder

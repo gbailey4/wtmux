@@ -13,10 +13,16 @@ struct PaneHeaderView: View {
     let worktree: Worktree?
     var isActive: Bool = false
 
+    @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
+
     @State private var showClosePaneAlert = false
     @State private var isSplitHovered = false
     @State private var isOverflowHovered = false
     @State private var isCloseHovered = false
+
+    private var currentTheme: TerminalTheme {
+        TerminalThemes.theme(forId: terminalThemeId)
+    }
 
     private var hasRunningProcesses: Bool {
         let tabs = terminalSessionManager.orderedSessions(forPane: pane.id.uuidString)
@@ -125,9 +131,12 @@ struct PaneHeaderView: View {
         .padding(.vertical, 7)
         .background {
             if isActive {
-                Color.accentColor.opacity(0.08)
+                ZStack {
+                    currentTheme.chromeBackground.toColor()
+                    Color.accentColor.opacity(0.08)
+                }
             } else {
-                Color(nsColor: .windowBackgroundColor)
+                currentTheme.chromeBackground.toColor()
             }
         }
         .contentShape(Rectangle())

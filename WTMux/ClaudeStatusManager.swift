@@ -22,7 +22,7 @@ final class ClaudeStatusManager {
 
     init() {
         DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.grahampark.wtmux.claudeStatus"),
+            forName: AppIdentity.claudeStatusNotification,
             object: nil,
             queue: .main
         ) { [weak self] notification in

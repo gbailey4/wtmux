@@ -12,6 +12,7 @@ struct WorktreeColumnView: View {
     let findWorktree: (String) -> Worktree?
 
     @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
+    @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
 
     @State private var showSetupBanner = false
     @State private var showConfigPendingBanner = false
@@ -37,6 +38,10 @@ struct WorktreeColumnView: View {
             get: { column.showRunnerPanel },
             set: { column.showRunnerPanel = $0 }
         )
+    }
+
+    private var currentTheme: TerminalTheme {
+        TerminalThemes.theme(forId: terminalThemeId)
     }
 
     private var isFocused: Bool {
@@ -96,6 +101,8 @@ struct WorktreeColumnView: View {
                 )
             }
         }
+        .background(currentTheme.background.toColor())
+        .environment(\.colorScheme, currentTheme.isDark ? .dark : .light)
         .overlay(
             DropIndicatorView(zone: column.dropZone)
         )

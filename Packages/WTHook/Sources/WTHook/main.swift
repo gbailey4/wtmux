@@ -1,5 +1,24 @@
 import Foundation
 
+// MARK: - App Identity
+
+/// Reads the notification prefix from the parent app bundle's Info.plist.
+/// The hook binary lives at App.app/Contents/MacOS/wtmux-hook, so Info.plist
+/// is at App.app/Contents/Info.plist — two levels up from the executable.
+func notificationPrefix() -> String {
+    let execPath = ProcessInfo.processInfo.arguments[0]
+    let contentsURL = URL(fileURLWithPath: execPath)
+        .deletingLastPathComponent()  // MacOS/
+        .deletingLastPathComponent()  // Contents/
+    let plistURL = contentsURL.appendingPathComponent("Info.plist")
+    if let data = try? Data(contentsOf: plistURL),
+       let dict = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+       let prefix = dict["WTMuxNotificationPrefix"] as? String {
+        return prefix
+    }
+    return "com.grahampark.wtmux"
+}
+
 // MARK: - Models
 
 enum ClaudeStatus: String {
@@ -68,7 +87,7 @@ let userInfo: [String: String] = [
 ]
 
 DistributedNotificationCenter.default().postNotificationName(
-    NSNotification.Name("com.grahampark.wtmux.claudeStatus"),
+    NSNotification.Name("\(notificationPrefix()).claudeStatus"),
     object: nil,
     userInfo: userInfo,
     deliverImmediately: true
