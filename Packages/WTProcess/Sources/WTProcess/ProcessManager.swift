@@ -50,7 +50,7 @@ public actor ProcessManager {
 
         let allocatedPort = port ?? allocatePort()
         var env = environment
-        env["WT_EASY_PORT"] = String(allocatedPort)
+        env["WTMUX_PORT"] = String(allocatedPort)
 
         let entry = ManagedProcess(
             id: id,

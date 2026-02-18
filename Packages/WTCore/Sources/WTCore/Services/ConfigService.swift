@@ -6,21 +6,8 @@ public actor ConfigService {
 
     public init() {}
 
-    /// Migrates legacy `.wteasy` config directory to `.wtmux` if present.
-    public func migrateIfNeeded(forRepo repoPath: String) {
-        let fm = FileManager.default
-        let oldDir = URL(fileURLWithPath: repoPath).appendingPathComponent(".wteasy")
-        let newDir = URL(fileURLWithPath: repoPath).appendingPathComponent(".wtmux")
-
-        guard fm.fileExists(atPath: oldDir.path),
-              !fm.fileExists(atPath: newDir.path) else { return }
-
-        try? fm.moveItem(at: oldDir, to: newDir)
-    }
-
     /// Reads `.wtmux/config.json` from the given repo path.
     public func readConfig(forRepo repoPath: String) -> ProjectConfig? {
-        migrateIfNeeded(forRepo: repoPath)
         let url = configFileURL(forRepo: repoPath)
         guard let data = try? Data(contentsOf: url) else { return nil }
         let decoder = JSONDecoder()

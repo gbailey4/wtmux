@@ -2,7 +2,7 @@ import Foundation
 
 enum AppIdentity {
     static var storeName: String {
-        Bundle.main.infoDictionary?["WTMuxStoreName"] as? String ?? "WTEasy"
+        Bundle.main.infoDictionary?["WTMuxStoreName"] as? String ?? "WTMux"
     }
 
     static var notificationPrefix: String {
