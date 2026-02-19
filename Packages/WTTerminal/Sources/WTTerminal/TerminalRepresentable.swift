@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import SwiftTerm
+import os
 
 enum KittyCommand: Equatable {
     case push(level: Int)
@@ -30,7 +31,7 @@ public struct TerminalRepresentable: NSViewRepresentable {
             initialCommand: session.initialCommand,
             deferExecution: session.deferExecution
         )
-        view.columnId = session.columnId
+        view.paneId = session.paneId
         view.runAsCommand = session.runAsCommand
         if let onExit = session.onProcessExit {
             let sessionId = session.id
@@ -71,8 +72,8 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
     private var resizeTimer: Timer?
     private var deferExecution: Bool
 
-    /// The column ID this terminal belongs to, injected as `WTMUX_COLUMN_ID` env var.
-    public var columnId: String?
+    /// The pane ID this terminal belongs to, injected as `WTMUX_PANE_ID` env var.
+    public var paneId: String?
 
     /// When true, starts shell with `-c command` instead of interactive mode.
     public var runAsCommand: Bool = false
@@ -101,6 +102,19 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
     /// Earliest time the idle timer is allowed to fire, preventing false triggers
     /// during gaps in shell initialization.
     private var shellIdleEarliestFire: Date = .distantPast
+
+    /// Thread-safe pinned scroll row (nil = at bottom, Int = saved yDisp row).
+    private let pinnedScrollState = OSAllocatedUnfairLock(initialState: Optional<Int>.none)
+
+    /// Flag to prevent scrolled() callback from updating during our programmatic restore.
+    private var isRestoringScroll = false
+
+    /// Navigation key codes that should NOT dismiss scroll-back.
+    private static let navigationKeyCodes: Set<UInt16> = [
+        123, 124, 125, 126,  // arrows
+        115, 119, 116, 121,  // Home, End, Page Up, Page Down
+        122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111  // F1-F12
+    ]
 
     public init(workingDirectory: String, shellPath: String, initialCommand: String? = nil, deferExecution: Bool = false) {
         self.workingDirectory = workingDirectory
@@ -139,10 +153,39 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
     }
 
     // Force a full repaint when switching between normal/alt screen buffers
-    // so TUI apps restore cleanly on exit.
+    // so TUI apps restore cleanly on exit. Also clear scroll pinning since
+    // alt-screen apps manage their own scrolling.
     open override func bufferActivated(source: Terminal) {
         super.bufferActivated(source: source)
+        pinnedScrollState.withLock { $0 = nil }
         setNeedsDisplay(bounds)
+    }
+
+    // MARK: - Scroll pinning
+
+    /// Track user scroll position so we can hold it steady while new output arrives.
+    /// Fires from scrollTo(row:) which handles scroll wheel, scroller drag, and ensureCaretIsVisible.
+    open override func scrolled(source: TerminalView, position: Double) {
+        guard !isRestoringScroll else { return }
+        if scrollPosition < 1.0 {
+            let yDisp = getTerminal().buffer.yDisp
+            pinnedScrollState.withLock { $0 = yDisp }
+        } else {
+            pinnedScrollState.withLock { $0 = nil }
+        }
+    }
+
+    /// Scrolls back to the saved pinned row if we're not in the alt screen buffer.
+    private func restorePinnedScrollIfNeeded() {
+        guard let savedRow = pinnedScrollState.withLock({ $0 }) else { return }
+        guard !getTerminal().isCurrentBufferAlternate else { return }
+        let currentYDisp = getTerminal().buffer.yDisp
+        let delta = currentYDisp - savedRow
+        if delta > 0 {
+            isRestoringScroll = true
+            scrollUp(lines: delta)
+            isRestoringScroll = false
+        }
     }
 
     // MARK: - Kitty keyboard protocol filter
@@ -187,6 +230,15 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
             filtered.withUnsafeBufferPointer { buffer in
                 let arraySlice = Array(buffer)[...]
                 super.dataReceived(slice: arraySlice)
+            }
+        }
+
+        // Restore pinned scroll position after new data pushes yDisp to the bottom.
+        // Dispatched to next run loop iteration so it runs before SwiftTerm's
+        // queuePendingDisplay (~16.67ms), preventing visible flicker.
+        if pinnedScrollState.withLock({ $0 }) != nil {
+            DispatchQueue.main.async { [weak self] in
+                self?.restorePinnedScrollIfNeeded()
             }
         }
     }
@@ -287,6 +339,11 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
     /// Returns `nil` to consume the event, or the original event to pass through.
     private func handleKeyEventForKitty(_ event: NSEvent) -> NSEvent? {
         guard window?.firstResponder === self else { return event }
+
+        // Clear scroll pinning when user types (non-Cmd, non-navigation keys)
+        if !event.modifierFlags.contains(.command) && !Self.navigationKeyCodes.contains(event.keyCode) {
+            pinnedScrollState.withLock { $0 = nil }
+        }
 
         // Shift+Enter → synthesize Option+Enter so it follows the same path
         // (either our Kitty CSI u encoder if active, or SwiftTerm's native
@@ -402,7 +459,7 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
         for key in Self.strippedEnvVars { env.removeValue(forKey: key) }
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
-        if let columnId { env["WTMUX_COLUMN_ID"] = columnId }
+        if let paneId { env["WTMUX_PANE_ID"] = paneId }
         let envStrings = env.map { "\($0.key)=\($0.value)" }
 
         let useCommandMode = runAsCommand && initialCommand != nil
