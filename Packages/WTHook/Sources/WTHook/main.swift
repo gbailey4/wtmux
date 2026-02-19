@@ -68,11 +68,13 @@ case "Stop":
 case "SessionEnd":
     status = .sessionEnded
 case "PermissionRequest":
-    status = .needsAttention
+    status = .thinking
 case "Notification":
     switch event.notification_type {
-    case "permission_prompt", "idle_prompt", "elicitation_dialog":
+    case "idle_prompt", "elicitation_dialog":
         status = .needsAttention
+    case "permission_prompt":
+        status = .thinking
     default:
         status = .thinking
     }
@@ -85,8 +87,9 @@ var userInfo: [String: String] = [
     "cwd": event.cwd,
     "sessionId": event.session_id,
 ]
-if let columnId = ProcessInfo.processInfo.environment["WTMUX_COLUMN_ID"] {
-    userInfo["columnId"] = columnId
+if let paneId = ProcessInfo.processInfo.environment["WTMUX_PANE_ID"]
+    ?? ProcessInfo.processInfo.environment["WTMUX_COLUMN_ID"] {
+    userInfo["paneId"] = paneId
 }
 
 DistributedNotificationCenter.default().postNotificationName(
