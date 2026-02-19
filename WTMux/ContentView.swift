@@ -49,8 +49,8 @@ struct ContentView: View {
     @State private var gitAvailable: Bool? = nil
     @State private var gitCheckDismissed = false
     @AppStorage("claudeIntegrationDismissed") private var claudeIntegrationDismissed = false
-    @State private var showCloseColumnAlert = false
-    @State private var pendingCloseColumnID: UUID?
+    @State private var showClosePaneAlert = false
+    @State private var pendingClosePaneID: UUID?
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
     @Environment(ThemeManager.self) private var themeManager
     @State private var sidebarCollapsed = false
@@ -67,7 +67,7 @@ struct ContentView: View {
 
     private var selectedWorktreeID: Binding<String?> {
         Binding(
-            get: { paneManager.focusedColumn?.worktreeID },
+            get: { paneManager.focusedPane?.worktreeID },
             set: { newValue in
                 guard let worktreeID = newValue else { return }
                 // Programmatic usage (AddProjectView) — always open in new window
@@ -78,22 +78,22 @@ struct ContentView: View {
 
     private var showRightPanel: Binding<Bool> {
         Binding(
-            get: { paneManager.focusedColumn?.showRightPanel ?? false },
-            set: { paneManager.focusedColumn?.showRightPanel = $0 }
+            get: { paneManager.focusedPane?.showRightPanel ?? false },
+            set: { paneManager.focusedPane?.showRightPanel = $0 }
         )
     }
 
     private var showRunnerPanel: Binding<Bool> {
         Binding(
-            get: { paneManager.focusedColumn?.showRunnerPanel ?? false },
-            set: { paneManager.focusedColumn?.showRunnerPanel = $0 }
+            get: { paneManager.focusedPane?.showRunnerPanel ?? false },
+            set: { paneManager.focusedPane?.showRunnerPanel = $0 }
         )
     }
 
     private var changedFileCount: Binding<Int> {
         Binding(
-            get: { paneManager.focusedColumn?.changedFileCount ?? 0 },
-            set: { paneManager.focusedColumn?.changedFileCount = $0 }
+            get: { paneManager.focusedPane?.changedFileCount ?? 0 },
+            set: { paneManager.focusedPane?.changedFileCount = $0 }
         )
     }
 
@@ -120,6 +120,27 @@ struct ContentView: View {
                     Image(systemName: "sidebar.left")
                 }
                 .help("Toggle Sidebar")
+            }
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 4) {
+                    ForEach(paneManager.windows) { window in
+                        windowTab(for: window)
+                            .overlay {
+                                WindowTabDropTarget(windowID: window.id, paneManager: paneManager)
+                            }
+                    }
+                    Button { paneManager.addWindow() } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 11))
+                            .padding(4)
+                    }
+                    .buttonStyle(.plain)
+                    .help("New Window")
+
+                    if toolbarWorktree != nil {
+                        toolbarBreadcrumb
+                    }
+                }
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -149,7 +170,7 @@ struct ContentView: View {
                 }
                 .keyboardShortcut("\\", modifiers: [.command, .shift])
                 .help("Split Right (Cmd+Shift+\\)")
-                .disabled(paneManager.columns.count >= 5)
+                .disabled(paneManager.panes.count >= 5)
             }
         }
         .background {
@@ -160,28 +181,28 @@ struct ContentView: View {
             Button("Close Worktree") { handleCmdShiftW() }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
                 .hidden()
-            Button("Focus Next Column") { paneManager.focusNextColumn() }
+            Button("Focus Next Pane") { paneManager.focusNextPane() }
                 .keyboardShortcut("]", modifiers: .command)
                 .hidden()
-            Button("Focus Previous Column") { paneManager.focusPreviousColumn() }
+            Button("Focus Previous Pane") { paneManager.focusPreviousPane() }
                 .keyboardShortcut("[", modifiers: .command)
                 .hidden()
             Button("Move to New Window") {
-                if let columnID = paneManager.focusedColumnID {
-                    paneManager.moveColumnToNewWindow(columnID: columnID)
+                if let paneID = paneManager.focusedPaneID {
+                    paneManager.movePaneToNewWindow(paneID: paneID)
                 }
             }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .hidden()
-            Button("Move to Next Window") { paneManager.moveColumnToNextWindow() }
+            Button("Move to Next Window") { paneManager.movePaneToNextWindow() }
                 .keyboardShortcut("]", modifiers: [.command, .shift])
                 .hidden()
-            Button("Move to Previous Window") { paneManager.moveColumnToPreviousWindow() }
+            Button("Move to Previous Window") { paneManager.movePaneToPreviousWindow() }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
                 .hidden()
-            Button("Minimize Column") {
-                if let id = paneManager.focusedColumnID {
-                    paneManager.minimizeColumn(id: id)
+            Button("Minimize Pane") {
+                if let id = paneManager.focusedPaneID {
+                    paneManager.minimizePane(id: id)
                 }
             }
                 .keyboardShortcut("m", modifiers: [.command, .shift])
@@ -232,18 +253,18 @@ struct ContentView: View {
         } message: {
             Text("This window has running terminal processes. Closing it will terminate them.")
         }
-        .alert("Close Column?", isPresented: $showCloseColumnAlert) {
+        .alert("Close Pane?", isPresented: $showClosePaneAlert) {
             Button("Close", role: .destructive) {
-                if let id = pendingCloseColumnID {
-                    paneManager.removeColumn(id: id)
-                    pendingCloseColumnID = nil
+                if let id = pendingClosePaneID {
+                    paneManager.removePane(id: id)
+                    pendingClosePaneID = nil
                 }
             }
             Button("Cancel", role: .cancel) {
-                pendingCloseColumnID = nil
+                pendingClosePaneID = nil
             }
         } message: {
-            Text("This column has a running terminal process. Closing it will terminate the process.")
+            Text("This pane has a running terminal process. Closing it will terminate the process.")
         }
     }
 
@@ -325,6 +346,47 @@ struct ContentView: View {
         try? modelContext.save()
     }
 
+    // MARK: - Toolbar Breadcrumb
+
+    /// Resolves the worktree to display in the toolbar breadcrumb based on the focused window/pane.
+    private var toolbarWorktree: Worktree? {
+        guard let window = paneManager.focusedWindow else { return nil }
+        switch window.kind {
+        case .worktrees:
+            guard let worktreeID = paneManager.focusedPane?.worktreeID else { return nil }
+            return findWorktree(id: worktreeID)
+        case .diff(let worktreePath, _):
+            return findWorktree(id: worktreePath)
+        }
+    }
+
+    @ViewBuilder
+    private var toolbarBreadcrumb: some View {
+        if let worktree = toolbarWorktree {
+            HStack(spacing: 5) {
+                if let project = worktree.project {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(projectColor(for: project))
+                        .frame(width: 3, height: 12)
+                    Image(systemName: project.resolvedIconName)
+                        .foregroundStyle(projectColor(for: project))
+                        .font(.caption)
+                    Text(project.name)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Text("/")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                Text(worktree.branchName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
     @ViewBuilder
     private var detailContent: some View {
         VStack(spacing: 0) {
@@ -401,8 +463,6 @@ struct ContentView: View {
             }
 
             if !paneManager.windows.isEmpty {
-                windowTabBar
-
                 if let focusedWindow = paneManager.focusedWindow {
                     switch focusedWindow.kind {
                     case .worktrees:
@@ -416,16 +476,15 @@ struct ContentView: View {
                                     paneManager: paneManager,
                                     terminalSessionManager: terminalSessionManager
                                 )
-                                Divider()
                             }
 
-                            MinimizedColumnsContainer(
+                            MinimizedPanesContainer(
                                 paneManager: paneManager,
                                 terminalSessionManager: terminalSessionManager,
                                 findWorktree: findWorktree
                             )
 
-                            if !paneManager.expandedColumns.isEmpty {
+                            if !paneManager.expandedPanes.isEmpty {
                                 SplitPaneContainerView(
                                     paneManager: paneManager,
                                     terminalSessionManager: terminalSessionManager,
@@ -444,7 +503,7 @@ struct ContentView: View {
                                     terminalSessionManager: terminalSessionManager,
                                     paneManager: paneManager,
                                     showRunnerPanel: showRunnerPanel,
-                                    isColumnFocused: true
+                                    isPaneFocused: true
                                 )
                                 .frame(maxWidth: .infinity)
                                 .frame(
@@ -479,33 +538,6 @@ struct ContentView: View {
                 }
             }
         }
-    }
-
-    @ViewBuilder
-    private var windowTabBar: some View {
-        HStack(spacing: 0) {
-            ForEach(paneManager.windows) { window in
-                windowTab(for: window)
-                    .overlay {
-                        WindowTabDropTarget(windowID: window.id, paneManager: paneManager)
-                    }
-            }
-            Button {
-                paneManager.addWindow()
-            } label: {
-                Image(systemName: "plus")
-                    .font(.subheadline)
-                    .padding(6)
-            }
-            .buttonStyle(.plain)
-            .help("New Window")
-            Spacer()
-                .overlay {
-                    WindowTabDropTarget(windowID: nil, paneManager: paneManager)
-                }
-        }
-        .background(currentTheme.chromeBackground.toColor())
-        .environment(\.colorScheme, currentTheme.isDark ? .dark : .light)
     }
 
     @ViewBuilder
@@ -558,9 +590,9 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .help("Close Window")
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-            .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear, in: RoundedRectangle(cornerRadius: 5))
         .contextMenu {
             Button("Rename...") {
                 startWindowRename(window: window)
@@ -605,14 +637,14 @@ struct ContentView: View {
 
     private func windowHasRunningProcesses(id: UUID) -> Bool {
         guard let window = paneManager.windows.first(where: { $0.id == id }) else { return false }
-        for column in window.columns {
-            if let session = terminalSessionManager.terminalSession(forColumn: column.id.uuidString),
+        for pane in window.panes {
+            if let session = terminalSessionManager.terminalSession(forPane: pane.id.uuidString),
                session.terminalView?.hasChildProcesses() == true {
                 return true
             }
-            if let worktreeID = column.worktreeID {
+            if let worktreeID = pane.worktreeID {
                 let othersHaveIt = paneManager.windows.contains { w in
-                    w.id != id && w.columns.contains { $0.worktreeID == worktreeID }
+                    w.id != id && w.panes.contains { $0.worktreeID == worktreeID }
                 }
                 if !othersHaveIt {
                     let runners = terminalSessionManager.sessions(forWorktree: worktreeID)
@@ -634,31 +666,31 @@ struct ContentView: View {
             return
         }
 
-        guard let column = paneManager.focusedColumn else { return }
+        guard let pane = paneManager.focusedPane else { return }
 
-        let columnId = column.id.uuidString
+        let paneId = pane.id.uuidString
 
         // Check if terminal has running processes
-        if let session = terminalSessionManager.terminalSession(forColumn: columnId),
+        if let session = terminalSessionManager.terminalSession(forPane: paneId),
            session.terminalView?.hasChildProcesses() == true {
-            pendingCloseColumnID = column.id
-            showCloseColumnAlert = true
+            pendingClosePaneID = pane.id
+            showClosePaneAlert = true
         } else {
-            paneManager.closeFocusedColumn()
+            paneManager.closeFocusedPane()
         }
     }
 
     private func handleCmdShiftW() {
-        guard let column = paneManager.focusedColumn,
-              let worktreeID = column.worktreeID else { return }
+        guard let pane = paneManager.focusedPane,
+              let worktreeID = pane.worktreeID else { return }
 
         let sessions = terminalSessionManager.sessions(forWorktree: worktreeID)
         let hasRunning = sessions.contains { $0.terminalView?.hasChildProcesses() == true }
 
         if hasRunning {
-            // Reuse the close column alert for the whole worktree
-            pendingCloseColumnID = column.id
-            showCloseColumnAlert = true
+            // Reuse the close pane alert for the whole worktree
+            pendingClosePaneID = pane.id
+            showClosePaneAlert = true
         } else {
             paneManager.clearWorktree(worktreeID)
         }
@@ -825,8 +857,8 @@ private struct WorktreeDropZone: NSViewRepresentable {
 
 // MARK: - WindowTabDropTarget
 
-/// AppKit-level drop target for column drags onto window tabs.
-/// Dropping a column header onto a window tab moves the column to that window.
+/// AppKit-level drop target for pane drags onto window tabs.
+/// Dropping a pane header onto a window tab moves the pane to that window.
 /// Dropping onto the gap area (nil windowID) creates a new window.
 private struct WindowTabDropTarget: NSViewRepresentable {
     let windowID: UUID?
@@ -861,8 +893,8 @@ private struct WindowTabDropTarget: NSViewRepresentable {
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
         override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-            // Only accept column drags (those with sourcePaneID)
-            guard decodeColumnDrag(from: sender) != nil else { return [] }
+            // Only accept pane drags (those with sourcePaneID)
+            guard decodePaneDrag(from: sender) != nil else { return [] }
             isHighlighted = true
             needsDisplay = true
             return .move
@@ -877,22 +909,22 @@ private struct WindowTabDropTarget: NSViewRepresentable {
             isHighlighted = false
             needsDisplay = true
 
-            guard let (_, sourceColumnUUID) = decodeColumnDrag(from: sender),
+            guard let (_, sourcePaneUUID) = decodePaneDrag(from: sender),
                   let paneManager else { return false }
 
             // Don't move to same window
             if let windowID,
-               let sourceWindow = paneManager.windows.first(where: { $0.columns.contains { $0.id == sourceColumnUUID } }),
+               let sourceWindow = paneManager.windows.first(where: { $0.panes.contains { $0.id == sourcePaneUUID } }),
                sourceWindow.id == windowID {
                 return false
             }
 
             if let windowID {
                 // Move to existing window
-                paneManager.moveColumnToWindow(columnID: sourceColumnUUID, targetWindowID: windowID)
+                paneManager.movePaneToWindow(paneID: sourcePaneUUID, targetWindowID: windowID)
             } else {
                 // Move to new window (gap area)
-                paneManager.moveColumnToNewWindow(columnID: sourceColumnUUID)
+                paneManager.movePaneToNewWindow(paneID: sourcePaneUUID)
             }
             return true
         }
@@ -905,7 +937,7 @@ private struct WindowTabDropTarget: NSViewRepresentable {
             }
         }
 
-        private func decodeColumnDrag(from info: NSDraggingInfo) -> (WorktreeReference, UUID)? {
+        private func decodePaneDrag(from info: NSDraggingInfo) -> (WorktreeReference, UUID)? {
             let pasteboard = info.draggingPasteboard
             var data = pasteboard.data(forType: WorktreeReference.pasteboardType)
             if data == nil, let item = pasteboard.pasteboardItems?.first {
@@ -914,10 +946,10 @@ private struct WindowTabDropTarget: NSViewRepresentable {
             guard let data,
                   let ref = try? JSONDecoder().decode(WorktreeReference.self, from: data),
                   let sourcePaneID = ref.sourcePaneID,
-                  let sourceColumnUUID = UUID(uuidString: sourcePaneID) else {
+                  let sourcePaneUUID = UUID(uuidString: sourcePaneID) else {
                 return nil
             }
-            return (ref, sourceColumnUUID)
+            return (ref, sourcePaneUUID)
         }
     }
 }
