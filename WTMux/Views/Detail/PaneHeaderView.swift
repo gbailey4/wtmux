@@ -3,10 +3,10 @@ import SwiftUI
 import WTCore
 import WTTerminal
 
-private let dragLogger = Logger(subsystem: "com.wtmux", category: "ColumnHeaderDrag")
+private let dragLogger = Logger(subsystem: "com.wtmux", category: "PaneHeaderDrag")
 
-struct ColumnHeaderView: View {
-    let column: WorktreeColumn
+struct PaneHeaderView: View {
+    let pane: WorktreePane
     let paneManager: SplitPaneManager
     let terminalSessionManager: TerminalSessionManager
     let worktree: Worktree?
@@ -14,29 +14,36 @@ struct ColumnHeaderView: View {
     var showBreadcrumb: Bool = true
 
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
+    @AppStorage("promptForPaneLabel") private var promptForPaneLabel = true
     @Environment(ThemeManager.self) private var themeManager
     @Environment(ClaudeStatusManager.self) private var claudeStatusManager
 
-    @State private var showCloseColumnAlert = false
+    @State private var showClosePaneAlert = false
     @State private var isCloseHovered = false
+    @State private var isEditingLabel = false
+    @State private var editingLabelText = ""
+    @State private var isLabelHovered = false
+    @State private var promptDontAsk = false
+    @FocusState private var isLabelFieldFocused: Bool
+    @FocusState private var isPromptFieldFocused: Bool
 
     private var currentTheme: TerminalTheme {
         themeManager.theme(forId: terminalThemeId)
     }
 
-    private var columnId: String { column.id.uuidString }
+    private var paneId: String { pane.id.uuidString }
 
     private var claudeStatus: ClaudeCodeStatus? {
-        guard let worktreeId = column.worktreeID else { return nil }
-        return claudeStatusManager.status(forColumn: columnId, worktreePath: worktreeId)
+        guard let worktreeId = pane.worktreeID else { return nil }
+        return claudeStatusManager.status(forPane: paneId, worktreePath: worktreeId)
     }
 
     private var hasRunningProcesses: Bool {
-        terminalSessionManager.terminalSession(forColumn: columnId)?.terminalView?.hasChildProcesses() == true
+        terminalSessionManager.terminalSession(forPane: paneId)?.terminalView?.hasChildProcesses() == true
     }
 
     private var showFocusBorder: Bool {
-        paneManager.expandedColumns.count > 1
+        paneManager.expandedPanes.count > 1
     }
 
     var body: some View {
@@ -46,6 +53,16 @@ struct ColumnHeaderView: View {
                 projectBranchLabel
                     .padding(.leading, 8)
             }
+            if let claudeStatus {
+                claudeStatusBadge(claudeStatus)
+                    .padding(.leading, showBreadcrumb ? 0 : 8)
+            }
+
+            paneLabelView
+                .padding(.leading, 6)
+                .popover(isPresented: showLabelPromptBinding, arrowEdge: .bottom) {
+                    labelPromptPopover
+                }
 
             Spacer()
 
@@ -66,34 +83,34 @@ struct ColumnHeaderView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            paneManager.focusedColumnID = column.id
+            paneManager.focusedPaneID = pane.id
         }
-        .alert("Close Column?", isPresented: $showCloseColumnAlert) {
+        .alert("Close Pane?", isPresented: $showClosePaneAlert) {
             Button("Close", role: .destructive) {
-                paneManager.removeColumn(id: column.id)
+                paneManager.removePane(id: pane.id)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This column has running terminal processes. Closing it will terminate them.")
+            Text("This pane has running terminal processes. Closing it will terminate them.")
         }
         .contextMenu {
             Button("Minimize") {
-                paneManager.minimizeColumn(id: column.id)
+                paneManager.minimizePane(id: pane.id)
             }
-            .disabled(column.worktreeID == nil)
+            .disabled(pane.worktreeID == nil)
 
             Divider()
 
             Button("Move to New Window") {
-                paneManager.moveColumnToNewWindow(columnID: column.id)
+                paneManager.movePaneToNewWindow(paneID: pane.id)
             }
-            .disabled(paneManager.focusedWindow?.columns.count ?? 0 <= 1)
+            .disabled(paneManager.focusedWindow?.panes.count ?? 0 <= 1)
 
             if paneManager.windows.count > 1 {
                 Menu("Move to Window\u{2026}") {
                     ForEach(paneManager.windows.filter({ $0.id != paneManager.focusedWindowID })) { window in
                         Button(window.name) {
-                            paneManager.moveColumnToWindow(columnID: column.id, targetWindowID: window.id)
+                            paneManager.movePaneToWindow(paneID: pane.id, targetWindowID: window.id)
                         }
                     }
                 }
@@ -101,14 +118,32 @@ struct ColumnHeaderView: View {
 
             Divider()
 
-            Button("New Column (Same Worktree)") {
-                paneManager.addColumn(worktreeID: column.worktreeID, after: column.id)
+            Button("New Pane (Same Worktree)") {
+                paneManager.addPane(worktreeID: pane.worktreeID, after: pane.id)
             }
-            .disabled(paneManager.columns.count >= 5)
+            .disabled(paneManager.panes.count >= 5)
+
+            Divider()
+
+            Button("Set Label\u{2026}") {
+                beginLabelEdit()
+            }
+
+            if let label = pane.label, !label.isEmpty {
+                Button(pane.showLabel ? "Hide Label" : "Show Label") {
+                    pane.showLabel.toggle()
+                    paneManager.saveStateExternally()
+                }
+
+                Button("Clear Label") {
+                    pane.label = nil
+                    paneManager.saveStateExternally()
+                }
+            }
         }
         .draggable(WorktreeReference(
-            worktreeID: column.worktreeID ?? "",
-            sourcePaneID: column.id.uuidString
+            worktreeID: pane.worktreeID ?? "",
+            sourcePaneID: pane.id.uuidString
         )) {
             HStack(spacing: 4) {
                 if let worktree {
@@ -147,12 +182,9 @@ struct ColumnHeaderView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if let claudeStatus {
-                    claudeStatusBadge(claudeStatus)
-                }
             }
         } else {
-            Text("Empty Column")
+            Text("Empty Pane")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -188,15 +220,144 @@ struct ColumnHeaderView: View {
         }
     }
 
+    // MARK: - Pane Label
+
+    @ViewBuilder
+    private var paneLabelView: some View {
+        if isEditingLabel {
+            TextField("Label", text: $editingLabelText)
+                .font(.caption)
+                .textFieldStyle(.plain)
+                .frame(maxWidth: 160)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 3))
+                .focused($isLabelFieldFocused)
+                .onSubmit { commitLabel() }
+                .onExitCommand { cancelLabelEdit() }
+                .onChange(of: editingLabelText) {
+                    if editingLabelText.count > 50 {
+                        editingLabelText = String(editingLabelText.prefix(50))
+                    }
+                }
+                .onAppear { isLabelFieldFocused = true }
+        } else if let label = pane.label, !label.isEmpty, pane.showLabel {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(label)
+                .onTapGesture { beginLabelEdit() }
+        } else {
+            Image(systemName: "pencil")
+                .font(.system(size: 9))
+                .foregroundStyle(.quaternary)
+                .onTapGesture { beginLabelEdit() }
+                .opacity(isLabelHovered ? 1 : 0)
+                .onHover { isLabelHovered = $0 }
+        }
+    }
+
+    private func beginLabelEdit() {
+        editingLabelText = pane.label ?? ""
+        isEditingLabel = true
+    }
+
+    private func commitLabel() {
+        let trimmed = editingLabelText.trimmingCharacters(in: .whitespaces)
+        pane.label = trimmed.isEmpty ? nil : trimmed
+        isEditingLabel = false
+        paneManager.saveStateExternally()
+    }
+
+    private func cancelLabelEdit() {
+        isEditingLabel = false
+    }
+
+    // MARK: - Label Prompt
+
+    private var showLabelPromptBinding: Binding<Bool> {
+        Binding(
+            get: { paneManager.pendingLabelPaneID == pane.id },
+            set: { if !$0 { paneManager.pendingLabelPaneID = nil } }
+        )
+    }
+
+    @ViewBuilder
+    private var labelPromptPopover: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Label this pane")
+                .font(.headline)
+
+            TextField("What are you working on?", text: $editingLabelText)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 240)
+                .focused($isPromptFieldFocused)
+                .onSubmit { commitLabelPrompt() }
+                .onChange(of: editingLabelText) {
+                    if editingLabelText.count > 50 {
+                        editingLabelText = String(editingLabelText.prefix(50))
+                    }
+                }
+
+            Toggle("Don\u{2019}t ask for new panes", isOn: $promptDontAsk)
+                .font(.caption)
+
+            HStack {
+                Spacer()
+                Button("Skip") {
+                    dismissLabelPrompt()
+                }
+                .keyboardShortcut(.cancelAction)
+                Button("Done") {
+                    commitLabelPrompt()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(editingLabelText.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding()
+        .onAppear {
+            editingLabelText = ""
+            promptDontAsk = false
+            // Delay focus until the popover window is fully established,
+            // otherwise the terminal view steals first responder.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                isPromptFieldFocused = true
+            }
+        }
+    }
+
+    private func commitLabelPrompt() {
+        let trimmed = editingLabelText.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty {
+            pane.label = trimmed
+            pane.showLabel = true
+            paneManager.saveStateExternally()
+        }
+        if promptDontAsk {
+            promptForPaneLabel = false
+        }
+        paneManager.pendingLabelPaneID = nil
+    }
+
+    private func dismissLabelPrompt() {
+        if promptDontAsk {
+            promptForPaneLabel = false
+        }
+        paneManager.pendingLabelPaneID = nil
+    }
+
     // MARK: - Header Buttons
 
     @ViewBuilder
     private var headerButtons: some View {
         HStack(spacing: 2) {
             // Minimize button
-            if column.worktreeID != nil {
+            if pane.worktreeID != nil {
                 Button {
-                    paneManager.minimizeColumn(id: column.id)
+                    paneManager.minimizePane(id: pane.id)
                 } label: {
                     Image(systemName: "minus")
                         .font(.system(size: 10, weight: .semibold))
@@ -205,12 +366,12 @@ struct ColumnHeaderView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Minimize Column")
+                .help("Minimize Pane")
             }
 
-            // New column button
+            // New pane button
             Button {
-                paneManager.addColumn(worktreeID: column.worktreeID, after: column.id)
+                paneManager.addPane(worktreeID: pane.worktreeID, after: pane.id)
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 10, weight: .semibold))
@@ -219,15 +380,15 @@ struct ColumnHeaderView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("New Column")
-            .disabled(paneManager.columns.count >= 5)
+            .help("New Pane")
+            .disabled(paneManager.panes.count >= 5)
 
             // Close button
             Button {
                 if hasRunningProcesses {
-                    showCloseColumnAlert = true
+                    showClosePaneAlert = true
                 } else {
-                    paneManager.removeColumn(id: column.id)
+                    paneManager.removePane(id: pane.id)
                 }
             } label: {
                 Image(systemName: "xmark")
@@ -239,7 +400,7 @@ struct ColumnHeaderView: View {
             }
             .buttonStyle(.plain)
             .onHover { isCloseHovered = $0 }
-            .help("Close Column")
+            .help("Close Pane")
         }
     }
 }

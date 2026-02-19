@@ -4,9 +4,9 @@ import WTGit
 import WTTerminal
 import WTTransport
 
-/// Composes a worktree column: unified header + terminal content + runner panel.
-struct WorktreeColumnView: View {
-    let column: WorktreeColumn
+/// Composes a worktree pane: unified header + terminal content + runner panel.
+struct WorktreePaneView: View {
+    let pane: WorktreePane
     let paneManager: SplitPaneManager
     let terminalSessionManager: TerminalSessionManager
     let findWorktree: (String) -> Worktree?
@@ -20,7 +20,7 @@ struct WorktreeColumnView: View {
     @State private var showConfigPendingBanner = false
 
     private var worktree: Worktree? {
-        guard let id = column.worktreeID else { return nil }
+        guard let id = pane.worktreeID else { return nil }
         return findWorktree(id)
     }
 
@@ -37,22 +37,22 @@ struct WorktreeColumnView: View {
 
     private var showRunnerPanelBinding: Binding<Bool> {
         Binding(
-            get: { column.showRunnerPanel },
-            set: { column.showRunnerPanel = $0 }
+            get: { pane.showRunnerPanel },
+            set: { pane.showRunnerPanel = $0 }
         )
     }
 
     private var showRightPanelBinding: Binding<Bool> {
         Binding(
-            get: { column.showRightPanel },
-            set: { column.showRightPanel = $0 }
+            get: { pane.showRightPanel },
+            set: { pane.showRightPanel = $0 }
         )
     }
 
     private var changedFileCountBinding: Binding<Int> {
         Binding(
-            get: { column.changedFileCount },
-            set: { column.changedFileCount = $0 }
+            get: { pane.changedFileCount },
+            set: { pane.changedFileCount = $0 }
         )
     }
 
@@ -61,7 +61,12 @@ struct WorktreeColumnView: View {
     }
 
     private var isFocused: Bool {
-        paneManager.focusedColumnID == column.id
+        paneManager.focusedPaneID == pane.id
+    }
+
+    /// Terminal should not grab focus while the label prompt popover is showing.
+    private var terminalShouldFocus: Bool {
+        isFocused && paneManager.pendingLabelPaneID != pane.id
     }
 
     var body: some View {
@@ -80,14 +85,14 @@ struct WorktreeColumnView: View {
                 Divider()
             }
 
-            // Unified column header (breadcrumb hidden in shared layout — shown in SharedWorktreeHeaderView)
-            ColumnHeaderView(
-                column: column,
+            // Unified pane header (breadcrumb hidden in shared layout — shown in SharedWorktreeHeaderView)
+            PaneHeaderView(
+                pane: pane,
                 paneManager: paneManager,
                 terminalSessionManager: terminalSessionManager,
                 worktree: worktree,
                 isFocused: isFocused,
-                showBreadcrumb: !isSharedLayout
+                showBreadcrumb: !isSharedLayout && paneManager.expandedPanes.count > 1
             )
             Divider()
 
@@ -95,15 +100,15 @@ struct WorktreeColumnView: View {
             if let worktree {
                 WorktreeDetailView(
                     worktree: worktree,
-                    columnId: column.id.uuidString,
+                    paneId: pane.id.uuidString,
                     terminalSessionManager: terminalSessionManager,
                     paneManager: paneManager,
                     showRightPanel: showRightPanelBinding,
                     changedFileCount: changedFileCountBinding,
-                    isColumnFocused: isFocused
+                    isPaneFocused: terminalShouldFocus
                 )
             } else {
-                emptyColumnPlaceholder
+                emptyPanePlaceholder
             }
 
             // Runner panel (hidden in shared layout — shown in ContentView)
@@ -114,19 +119,19 @@ struct WorktreeColumnView: View {
                     terminalSessionManager: terminalSessionManager,
                     paneManager: paneManager,
                     showRunnerPanel: showRunnerPanelBinding,
-                    isColumnFocused: isFocused
+                    isPaneFocused: terminalShouldFocus
                 )
                 .frame(maxWidth: .infinity)
                 .frame(
-                    minHeight: column.showRunnerPanel ? 150 : nil,
-                    idealHeight: column.showRunnerPanel ? 250 : nil,
-                    maxHeight: column.showRunnerPanel ? 350 : nil
+                    minHeight: pane.showRunnerPanel ? 150 : nil,
+                    idealHeight: pane.showRunnerPanel ? 250 : nil,
+                    maxHeight: pane.showRunnerPanel ? 350 : nil
                 )
             }
         }
-        // Focus indicator: 2px accent border on all sides for focused column, dim overlay for unfocused
+        // Focus indicator: 2px accent border on all sides for focused pane, dim overlay for unfocused
         .overlay {
-            if paneManager.columns.count > 1 {
+            if paneManager.panes.count > 1 {
                 if isFocused {
                     RoundedRectangle(cornerRadius: 0)
                         .stroke(Color.accentColor, lineWidth: 2)
@@ -140,17 +145,17 @@ struct WorktreeColumnView: View {
         .background(currentTheme.background.toColor())
         .environment(\.colorScheme, currentTheme.isDark ? .dark : .light)
         .overlay(
-            DropIndicatorView(zone: column.dropZone)
+            DropIndicatorView(zone: pane.dropZone)
         )
         .contentShape(Rectangle())
         .onTapGesture {
-            paneManager.focusedColumnID = column.id
+            paneManager.focusedPaneID = pane.id
         }
-        .task(id: column.worktreeID) {
+        .task(id: pane.worktreeID) {
             if let wt = worktree {
                 showConfigPendingBanner = wt.project?.needsClaudeConfig == true
                 showSetupBanner = wt.needsSetup == true
-                // Auto-launch Claude config when the column first loads for a project that needs it
+                // Auto-launch Claude config when the pane first loads for a project that needs it
                 if wt.project?.needsClaudeConfig == true, !isClaudeConfigRunning,
                    claudeIntegrationService.canUseClaudeConfig {
                     showConfigPendingBanner = false
@@ -178,14 +183,14 @@ struct WorktreeColumnView: View {
         }
     }
 
-    // MARK: - Empty Column Placeholder
+    // MARK: - Empty Pane Placeholder
 
     @ViewBuilder
-    private var emptyColumnPlaceholder: some View {
+    private var emptyPanePlaceholder: some View {
         ContentUnavailableView(
             "No Worktree",
             systemImage: "rectangle.split.2x1",
-            description: Text("Select a worktree from the sidebar to display it in this column.")
+            description: Text("Select a worktree from the sidebar to display it in this pane.")
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(currentTheme.background.toColor())
@@ -245,13 +250,13 @@ struct WorktreeColumnView: View {
             Spacer()
             Button("Run Setup") {
                 showSetupBanner = false
-                column.showRunnerPanel = true
+                pane.showRunnerPanel = true
                 let runner = RunnerPanelView(
                     worktree: worktree,
                     terminalSessionManager: terminalSessionManager,
                     paneManager: paneManager,
                     showRunnerPanel: showRunnerPanelBinding,
-                    isColumnFocused: isFocused
+                    isPaneFocused: isFocused
                 )
                 runner.runSetup()
             }
@@ -275,7 +280,7 @@ struct WorktreeColumnView: View {
         guard let repoPath = worktree.project?.repoPath else { return }
         ClaudeConfigHelper.openConfigTerminal(
             terminalSessionManager: terminalSessionManager,
-            columnId: column.id.uuidString,
+            paneId: pane.id.uuidString,
             worktreeId: worktree.path,
             workingDirectory: worktree.path,
             repoPath: repoPath
