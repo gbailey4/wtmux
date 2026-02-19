@@ -11,19 +11,14 @@ struct ColumnHeaderView: View {
     let terminalSessionManager: TerminalSessionManager
     let worktree: Worktree?
     var isFocused: Bool = false
+    var showBreadcrumb: Bool = true
 
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
     @Environment(ThemeManager.self) private var themeManager
     @Environment(ClaudeStatusManager.self) private var claudeStatusManager
 
     @State private var showCloseColumnAlert = false
-    @State private var isOverflowHovered = false
     @State private var isCloseHovered = false
-
-    @State private var renamingTabId: String?
-    @State private var renameText: String = ""
-    @State private var renameError: Bool = false
-    @FocusState private var isRenameFieldFocused: Bool
 
     private var currentTheme: TerminalTheme {
         themeManager.theme(forId: terminalThemeId)
@@ -31,21 +26,13 @@ struct ColumnHeaderView: View {
 
     private var columnId: String { column.id.uuidString }
 
-    private var terminalTabs: [TerminalSession] {
-        terminalSessionManager.orderedSessions(forColumn: columnId)
-    }
-
     private var claudeStatus: ClaudeCodeStatus? {
         guard let worktreeId = column.worktreeID else { return nil }
         return claudeStatusManager.status(forColumn: columnId, worktreePath: worktreeId)
     }
 
-    private var activeTabId: String? {
-        terminalSessionManager.activeSessionId[columnId]
-    }
-
     private var hasRunningProcesses: Bool {
-        terminalTabs.contains { $0.terminalView?.hasChildProcesses() == true }
+        terminalSessionManager.terminalSession(forColumn: columnId)?.terminalView?.hasChildProcesses() == true
     }
 
     private var showFocusBorder: Bool {
@@ -55,19 +42,9 @@ struct ColumnHeaderView: View {
     var body: some View {
         HStack(spacing: 0) {
             // Project / branch info
-            projectBranchLabel
-                .padding(.leading, 8)
-
-            // Terminal tabs
-            if !terminalTabs.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 0) {
-                        ForEach(terminalTabs) { session in
-                            terminalTab(session: session)
-                        }
-                    }
-                }
-                .padding(.leading, 6)
+            if showBreadcrumb {
+                projectBranchLabel
+                    .padding(.leading, 8)
             }
 
             Spacer()
@@ -100,16 +77,6 @@ struct ColumnHeaderView: View {
             Text("This column has running terminal processes. Closing it will terminate them.")
         }
         .contextMenu {
-            Button("New Terminal Tab") {
-                createNewTerminalTab()
-            }
-            Button("New Column (Same Worktree)") {
-                paneManager.addColumn(worktreeID: column.worktreeID, after: column.id)
-            }
-            .disabled(paneManager.columns.count >= 5)
-
-            Divider()
-
             Button("Move to New Window") {
                 paneManager.moveColumnToNewWindow(columnID: column.id)
             }
@@ -124,6 +91,13 @@ struct ColumnHeaderView: View {
                     }
                 }
             }
+
+            Divider()
+
+            Button("New Column (Same Worktree)") {
+                paneManager.addColumn(worktreeID: column.worktreeID, after: column.id)
+            }
+            .disabled(paneManager.columns.count >= 5)
         }
         .draggable(WorktreeReference(
             worktreeID: column.worktreeID ?? "",
@@ -212,9 +186,9 @@ struct ColumnHeaderView: View {
     @ViewBuilder
     private var headerButtons: some View {
         HStack(spacing: 2) {
-            // New tab button
+            // New column button
             Button {
-                createNewTerminalTab()
+                paneManager.addColumn(worktreeID: column.worktreeID, after: column.id)
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 10, weight: .semibold))
@@ -223,47 +197,8 @@ struct ColumnHeaderView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("New Terminal Tab")
-
-            // Overflow menu
-            Menu {
-                Button("New Terminal Tab") {
-                    createNewTerminalTab()
-                }
-                Button("New Column (Same Worktree)") {
-                    paneManager.addColumn(worktreeID: column.worktreeID, after: column.id)
-                }
-                .disabled(paneManager.columns.count >= 5)
-
-                Divider()
-
-                Button("Move to New Window") {
-                    paneManager.moveColumnToNewWindow(columnID: column.id)
-                }
-                .disabled(paneManager.focusedWindow?.columns.count ?? 0 <= 1)
-
-                if paneManager.windows.count > 1 {
-                    Menu("Move to Window\u{2026}") {
-                        ForEach(paneManager.windows.filter({ $0.id != paneManager.focusedWindowID })) { window in
-                            Button(window.name) {
-                                paneManager.moveColumnToWindow(columnID: column.id, targetWindowID: window.id)
-                            }
-                        }
-                    }
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
-                    .background(isOverflowHovered ? Color.primary.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 4))
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .onHover { isOverflowHovered = $0 }
-            .help("Column Options")
+            .help("New Column")
+            .disabled(paneManager.columns.count >= 5)
 
             // Close button
             Button {
@@ -284,132 +219,5 @@ struct ColumnHeaderView: View {
             .onHover { isCloseHovered = $0 }
             .help("Close Column")
         }
-    }
-
-    // MARK: - Terminal Tabs
-
-    @ViewBuilder
-    private func terminalTab(session: TerminalSession) -> some View {
-        HStack(spacing: 4) {
-            if renamingTabId == session.id {
-                VStack(alignment: .leading, spacing: 2) {
-                    TextField("Tab name", text: $renameText)
-                        .textFieldStyle(.plain)
-                        .font(.caption)
-                        .lineLimit(1)
-                        .frame(minWidth: 50, maxWidth: 100)
-                        .focused($isRenameFieldFocused)
-                        .onSubmit { commitRename(sessionId: session.id) }
-                        .onChange(of: isRenameFieldFocused) { _, focused in
-                            if !focused { commitRename(sessionId: session.id) }
-                        }
-                        .onChange(of: renameText) { _, _ in renameError = false }
-                        .onKeyPress(.escape) {
-                            cancelRename()
-                            return .handled
-                        }
-                    if renameError {
-                        Text("Name already in use")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.red)
-                    }
-                }
-            } else {
-                Text(session.title)
-                    .font(.caption)
-                    .lineLimit(1)
-                    .onTapGesture(count: 2) {
-                        startRename(session: session)
-                    }
-                    .onTapGesture(count: 1) {
-                        terminalSessionManager.setActiveSession(columnId: columnId, sessionId: session.id)
-                        paneManager.focusedColumnID = column.id
-                    }
-            }
-
-            Button {
-                closeTab(session: session)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.tertiary)
-            }
-            .buttonStyle(.plain)
-            .help("Close Tab")
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(session.id == activeTabId ? Color.accentColor.opacity(0.2) : Color.clear)
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .draggable(TerminalTabReference(columnId: columnId, sessionId: session.id))
-        .dropDestination(for: TerminalTabReference.self) { droppedRefs, _ in
-            guard let ref = droppedRefs.first else { return false }
-            let targetIndex = terminalTabs.firstIndex(where: { $0.id == session.id }) ?? terminalTabs.count
-            if ref.columnId == columnId {
-                // Intra-column reorder
-                guard ref.sessionId != session.id else { return false }
-                terminalSessionManager.moveTab(sessionId: ref.sessionId, toIndex: targetIndex, inColumn: columnId)
-            } else {
-                // Cross-column move: move tab to this column
-                guard let fromColumnUUID = UUID(uuidString: ref.columnId) else { return false }
-                paneManager.moveTabToColumn(sessionId: ref.sessionId, fromColumnId: fromColumnUUID, toColumnId: column.id)
-            }
-            return true
-        }
-    }
-
-    // MARK: - Tab Actions
-
-    private func createNewTerminalTab() {
-        let startCommand: String? = {
-            guard let cmd = worktree?.project?.profile?.terminalStartCommand, !cmd.isEmpty else { return nil }
-            return cmd
-        }()
-        _ = terminalSessionManager.createTab(
-            forColumn: columnId,
-            worktreeId: worktree?.path ?? "",
-            workingDirectory: worktree?.path ?? "",
-            initialCommand: startCommand
-        )
-    }
-
-    private func closeTab(session: TerminalSession) {
-        if session.terminalView?.hasChildProcesses() == true {
-            // For now, close directly — ContentView's Cmd+W handles confirmation
-            terminalSessionManager.removeTab(sessionId: session.id)
-            cascadeIfEmpty()
-        } else {
-            terminalSessionManager.removeTab(sessionId: session.id)
-            cascadeIfEmpty()
-        }
-    }
-
-    private func cascadeIfEmpty() {
-        if terminalSessionManager.orderedSessions(forColumn: columnId).isEmpty {
-            paneManager.removeColumn(id: column.id)
-        }
-    }
-
-    private func startRename(session: TerminalSession) {
-        renameText = session.title
-        renamingTabId = session.id
-        isRenameFieldFocused = true
-    }
-
-    private func commitRename(sessionId: String) {
-        guard renamingTabId == sessionId else { return }
-        let trimmed = renameText.trimmingCharacters(in: .whitespaces)
-        if !trimmed.isEmpty {
-            if !terminalSessionManager.renameTab(sessionId: sessionId, to: trimmed) {
-                renameError = true
-                return
-            }
-        }
-        renameError = false
-        renamingTabId = nil
-    }
-
-    private func cancelRename() {
-        renamingTabId = nil
     }
 }

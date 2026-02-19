@@ -64,6 +64,18 @@ final class SplitPaneManager {
         Set(windows.flatMap { $0.columns.compactMap(\.worktreeID) })
     }
 
+    /// Returns the shared worktree ID when all columns in the focused window display the same worktree
+    /// and there are 2+ columns. Returns nil otherwise.
+    var sharedWorktreeID: String? {
+        guard let window = focusedWindow else { return nil }
+        let columns = window.columns
+        guard columns.count >= 2 else { return nil }
+        let ids = columns.compactMap(\.worktreeID)
+        guard ids.count == columns.count else { return nil }
+        let unique = Set(ids)
+        return unique.count == 1 ? unique.first : nil
+    }
+
     private static let stateKey = "splitPaneState"
 
     init() {
@@ -174,6 +186,32 @@ final class SplitPaneManager {
         focusedColumnID = column.id
         cleanupEmptyWindows()
         saveState()
+    }
+
+    /// Moves the focused column to the next window.
+    func moveColumnToNextWindow() {
+        guard let columnID = focusedColumnID,
+              let currentWindowID = focusedWindowID,
+              let currentIndex = windows.firstIndex(where: { $0.id == currentWindowID }),
+              windows.count > 1 else { return }
+        let nextIndex = (currentIndex + 1) % windows.count
+        let targetWindow = windows[nextIndex]
+        if targetWindow.id != currentWindowID {
+            moveColumnToWindow(columnID: columnID, targetWindowID: targetWindow.id)
+        }
+    }
+
+    /// Moves the focused column to the previous window.
+    func moveColumnToPreviousWindow() {
+        guard let columnID = focusedColumnID,
+              let currentWindowID = focusedWindowID,
+              let currentIndex = windows.firstIndex(where: { $0.id == currentWindowID }),
+              windows.count > 1 else { return }
+        let prevIndex = (currentIndex - 1 + windows.count) % windows.count
+        let targetWindow = windows[prevIndex]
+        if targetWindow.id != currentWindowID {
+            moveColumnToWindow(columnID: columnID, targetWindowID: targetWindow.id)
+        }
     }
 
     /// Removes windows that have only empty columns (no worktreeID), unless it's the focused window.
@@ -325,52 +363,6 @@ final class SplitPaneManager {
         let clampedIndex = max(0, min(index, window.columns.count))
         window.columns.insert(newColumn, at: clampedIndex)
         focusedColumnID = newColumn.id
-        saveState()
-    }
-
-    // MARK: - Tab Fluidity (move tabs between columns)
-
-    /// Extracts a terminal tab from its current column into a new column at the given index.
-    func extractTabToNewColumn(sessionId: String, fromColumnId: UUID, atIndex: Int) {
-        guard let window = focusedWindow,
-              window.columns.count < 5,
-              let sourceColumn = column(for: fromColumnId),
-              let tsm = terminalSessionManager else { return }
-
-        // Create a new column with the same worktree
-        let newColumn = WorktreeColumn(worktreeID: sourceColumn.worktreeID)
-        let clampedIndex = max(0, min(atIndex, window.columns.count))
-        window.columns.insert(newColumn, at: clampedIndex)
-
-        // Move the session to the new column
-        tsm.moveSession(sessionId: sessionId, fromColumn: fromColumnId.uuidString, toColumn: newColumn.id.uuidString)
-
-        // If source column has no more tabs, remove it
-        if tsm.orderedSessions(forColumn: fromColumnId.uuidString).isEmpty {
-            window.columns.removeAll { $0.id == fromColumnId }
-        }
-
-        focusedColumnID = newColumn.id
-        saveState()
-    }
-
-    /// Moves a terminal tab from one column to another existing column.
-    func moveTabToColumn(sessionId: String, fromColumnId: UUID, toColumnId: UUID) {
-        guard let tsm = terminalSessionManager,
-              fromColumnId != toColumnId else { return }
-
-        tsm.moveSession(sessionId: sessionId, fromColumn: fromColumnId.uuidString, toColumn: toColumnId.uuidString)
-
-        // If source column has no more tabs, remove it
-        if let window = focusedWindow,
-           tsm.orderedSessions(forColumn: fromColumnId.uuidString).isEmpty {
-            window.columns.removeAll { $0.id == fromColumnId }
-            if focusedColumnID == fromColumnId {
-                focusedColumnID = toColumnId
-            }
-        }
-
-        focusedColumnID = toColumnId
         saveState()
     }
 

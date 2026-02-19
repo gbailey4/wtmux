@@ -22,12 +22,8 @@ struct WorktreeDetailView: View {
 
     private var worktreeId: String { worktree.path }
 
-    private var terminalTabs: [TerminalSession] {
-        terminalSessionManager.orderedSessions(forPane: columnId)
-    }
-
-    private var activeTabId: String? {
-        terminalSessionManager.activeSessionId[columnId]
+    private var terminalSession: TerminalSession? {
+        terminalSessionManager.terminalSession(forColumn: columnId)
     }
 
     private var columnUUID: UUID {
@@ -52,7 +48,7 @@ struct WorktreeDetailView: View {
         }
         .task(id: "\(worktreeId)-\(columnId)") {
             changedFileCount = 0
-            ensureFirstTab()
+            ensureTerminal()
             let git = GitService(transport: LocalTransport(), repoPath: worktree.path)
             if let files = try? await git.status() {
                 changedFileCount = files.count
@@ -60,16 +56,16 @@ struct WorktreeDetailView: View {
         }
     }
 
-    private func ensureFirstTab() {
-        guard terminalSessionManager.orderedSessions(forPane: columnId).isEmpty else { return }
+    private func ensureTerminal() {
+        guard terminalSessionManager.terminalSession(forColumn: columnId) == nil else { return }
 
         let startCommand: String? = {
             guard let cmd = worktree.project?.profile?.terminalStartCommand, !cmd.isEmpty else { return nil }
             return cmd
         }()
 
-        _ = terminalSessionManager.createTab(
-            forPane: columnId,
+        _ = terminalSessionManager.createTerminal(
+            forColumn: columnId,
             worktreeId: worktreeId,
             workingDirectory: worktree.path,
             initialCommand: startCommand
@@ -80,27 +76,22 @@ struct WorktreeDetailView: View {
 
     @ViewBuilder
     private var terminalContentView: some View {
-        ZStack {
-            ForEach(terminalTabs) { session in
-                let isActiveTab = session.id == activeTabId
-                TerminalRepresentable(session: session, isActive: isActiveTab && isColumnFocused, theme: currentTheme)
-                    .padding(.leading, 8)
-                    .opacity(isActiveTab ? 1 : 0)
-                    .allowsHitTesting(isActiveTab)
-            }
-            if terminalTabs.isEmpty {
-                ContentUnavailableView {
-                    Label("No Terminal", systemImage: "terminal")
-                } description: {
-                    Text("Open a new terminal to get started.")
-                } actions: {
-                    Button("New Terminal") {
-                        ensureFirstTab()
-                    }
-                    .buttonStyle(.borderedProminent)
+        if let session = terminalSession {
+            TerminalRepresentable(session: session, isActive: isColumnFocused, theme: currentTheme)
+                .padding(.leading, 8)
+                .background(currentTheme.background.toColor())
+        } else {
+            ContentUnavailableView {
+                Label("No Terminal", systemImage: "terminal")
+            } description: {
+                Text("Open a new terminal to get started.")
+            } actions: {
+                Button("New Terminal") {
+                    ensureTerminal()
                 }
+                .buttonStyle(.borderedProminent)
             }
+            .background(currentTheme.background.toColor())
         }
-        .background(currentTheme.background.toColor())
     }
 }

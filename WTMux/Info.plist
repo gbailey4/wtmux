@@ -37,12 +37,6 @@
 	<string>public.app-category.developer-tools</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
-	<key>WTMuxStoreName</key>
-	<string>$(WTMUX_STORE_NAME)</string>
-	<key>WTMuxMCPServerName</key>
-	<string>$(WTMUX_MCP_SERVER_NAME)</string>
-	<key>WTMuxNotificationPrefix</key>
-	<string>$(WTMUX_NOTIFICATION_PREFIX)</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
@@ -57,18 +51,12 @@
 			<key>UTTypeTagSpecification</key>
 			<dict/>
 		</dict>
-		<dict>
-			<key>UTTypeConformsTo</key>
-			<array>
-				<string>public.data</string>
-			</array>
-			<key>UTTypeDescription</key>
-			<string>$(WTMUX_DISPLAY_NAME) Terminal Tab Reference</string>
-			<key>UTTypeIdentifier</key>
-			<string>$(PRODUCT_BUNDLE_IDENTIFIER).terminal-tab-reference</string>
-			<key>UTTypeTagSpecification</key>
-			<dict/>
-		</dict>
 	</array>
+	<key>WTMuxMCPServerName</key>
+	<string>$(WTMUX_MCP_SERVER_NAME)</string>
+	<key>WTMuxNotificationPrefix</key>
+	<string>$(WTMUX_NOTIFICATION_PREFIX)</string>
+	<key>WTMuxStoreName</key>
+	<string>$(WTMUX_STORE_NAME)</string>
 </dict>
 </plist>

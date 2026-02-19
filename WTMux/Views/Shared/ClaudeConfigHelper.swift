@@ -16,7 +16,7 @@ enum ClaudeConfigHelper {
         workingDirectory: String,
         repoPath: String
     ) -> TerminalSession {
-        terminalSessionManager.createTab(
+        terminalSessionManager.createTerminal(
             forColumn: columnId,
             worktreeId: worktreeId,
             workingDirectory: workingDirectory,

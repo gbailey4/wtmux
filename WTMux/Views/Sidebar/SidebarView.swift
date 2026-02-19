@@ -484,7 +484,7 @@ struct SidebarView: View {
 
         // 2. Remove terminal tab sessions
         for session in terminalSessionManager.sessions(forWorktree: worktree.path) {
-            terminalSessionManager.removeTab(sessionId: session.id)
+            terminalSessionManager.removeTerminal(sessionId: session.id)
         }
 
         // 3. Call git worktree remove
@@ -535,7 +535,7 @@ struct SidebarView: View {
             }
             terminalSessionManager.removeRunnerSessions(forWorktree: worktree.path)
             for session in terminalSessionManager.sessions(forWorktree: worktree.path) {
-                terminalSessionManager.removeTab(sessionId: session.id)
+                terminalSessionManager.removeTerminal(sessionId: session.id)
             }
             paneManager.clearWorktree(worktree.path)
         }
@@ -561,7 +561,7 @@ struct SidebarView: View {
             }
             terminalSessionManager.removeRunnerSessions(forWorktree: worktree.path)
             for session in terminalSessionManager.sessions(forWorktree: worktree.path) {
-                terminalSessionManager.removeTab(sessionId: session.id)
+                terminalSessionManager.removeTerminal(sessionId: session.id)
             }
 
             // Remove git worktree

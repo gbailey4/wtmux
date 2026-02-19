@@ -10,6 +10,7 @@ struct WorktreeColumnView: View {
     let paneManager: SplitPaneManager
     let terminalSessionManager: TerminalSessionManager
     let findWorktree: (String) -> Worktree?
+    var isSharedLayout: Bool = false
 
     @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
@@ -65,27 +66,28 @@ struct WorktreeColumnView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Configuration pending banner
-            if let worktree, showConfigPendingBanner, worktree.project?.needsClaudeConfig == true, !isClaudeConfigRunning {
+            // Configuration pending banner (hidden in shared layout — shown in SharedWorktreeHeaderView)
+            if !isSharedLayout, let worktree, showConfigPendingBanner, worktree.project?.needsClaudeConfig == true, !isClaudeConfigRunning {
                 configPendingBanner(worktree: worktree)
                 Divider()
             }
 
-            // Setup banner
-            if let worktree, showSetupBanner,
+            // Setup banner (hidden in shared layout — shown in SharedWorktreeHeaderView)
+            if !isSharedLayout, let worktree, showSetupBanner,
                let commands = worktree.project?.profile?.setupCommands,
                !commands.filter({ !$0.isEmpty }).isEmpty {
                 setupBanner(worktree: worktree, commands: commands)
                 Divider()
             }
 
-            // Unified column header
+            // Unified column header (breadcrumb hidden in shared layout — shown in SharedWorktreeHeaderView)
             ColumnHeaderView(
                 column: column,
                 paneManager: paneManager,
                 terminalSessionManager: terminalSessionManager,
                 worktree: worktree,
-                isFocused: isFocused
+                isFocused: isFocused,
+                showBreadcrumb: !isSharedLayout
             )
             Divider()
 
@@ -104,8 +106,8 @@ struct WorktreeColumnView: View {
                 emptyColumnPlaceholder
             }
 
-            // Shared runner panel
-            if let worktree {
+            // Runner panel (hidden in shared layout — shown in ContentView)
+            if !isSharedLayout, let worktree {
                 Divider()
                 RunnerPanelView(
                     worktree: worktree,

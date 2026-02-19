@@ -251,7 +251,7 @@ struct RunnerPanelView: View {
             // Open Shell button
             Button {
                 if let columnId = paneManager.focusedColumn?.id.uuidString {
-                    _ = terminalSessionManager.createTab(
+                    _ = terminalSessionManager.createTerminal(
                         forColumn: columnId,
                         worktreeId: worktreeId,
                         workingDirectory: worktree.path,

@@ -18,7 +18,7 @@ class DroppableSplitView: NSSplitView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        registerForDraggedTypes([WorktreeReference.pasteboardType, TerminalTabReference.pasteboardType])
+        registerForDraggedTypes([WorktreeReference.pasteboardType])
     }
 
     @available(*, unavailable)
@@ -58,6 +58,7 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
     let paneManager: SplitPaneManager
     let terminalSessionManager: TerminalSessionManager
     let findWorktree: (String) -> Worktree?
+    var isSharedLayout: Bool = false
 
     private static let minimumColumnWidth: CGFloat = 300
 
@@ -90,6 +91,7 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
         context.coordinator.findWorktree = findWorktree
         context.coordinator.terminalSessionManager = terminalSessionManager
         context.coordinator.paneManager = paneManager
+        context.coordinator.isSharedLayout = isSharedLayout
         context.coordinator.reconcile(controller: controller, columns: paneManager.columns)
     }
 
@@ -106,6 +108,7 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
         var paneManager: SplitPaneManager
         var terminalSessionManager: TerminalSessionManager
         var findWorktree: (String) -> Worktree?
+        var isSharedLayout: Bool = false
         weak var splitView: DroppableSplitView?
 
         // Stable mapping: columnID → (splitViewItem, hostingController)
@@ -124,7 +127,7 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
         // MARK: - Drag & Drop
 
         private func columnHasActiveSessions(_ column: WorktreeColumn) -> Bool {
-            !terminalSessionManager.orderedSessions(forColumn: column.id.uuidString).isEmpty
+            terminalSessionManager.terminalSession(forColumn: column.id.uuidString) != nil
         }
 
         func handleDragUpdated(_ info: NSDraggingInfo) -> NSDragOperation {
@@ -215,25 +218,6 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
             }
 
             let pasteboard = info.draggingPasteboard
-
-            // --- Terminal tab drag (extract tab to new column) ---
-            if let tabData = pasteboard.data(forType: TerminalTabReference.pasteboardType)
-                ?? pasteboard.pasteboardItems?.first?.data(forType: TerminalTabReference.pasteboardType),
-               let tabRef = try? JSONDecoder().decode(TerminalTabReference.self, from: tabData),
-               let fromColumnUUID = UUID(uuidString: tabRef.columnId) {
-                dragLogger.info("Tab drag: session=\(tabRef.sessionId) from=\(tabRef.columnId) zone=\(String(describing: targetZone))")
-                if targetZone == .left || targetZone == .right {
-                    let targetIndex: Int = {
-                        guard let ti = paneManager.columns.firstIndex(where: { $0.id == targetColumn.id }) else { return 0 }
-                        return targetZone == .left ? ti : ti + 1
-                    }()
-                    paneManager.extractTabToNewColumn(sessionId: tabRef.sessionId, fromColumnId: fromColumnUUID, atIndex: targetIndex)
-                } else {
-                    // Center zone or single column: merge tab into target column
-                    paneManager.moveTabToColumn(sessionId: tabRef.sessionId, fromColumnId: fromColumnUUID, toColumnId: targetColumn.id)
-                }
-                return true
-            }
 
             // --- Worktree drag (from sidebar or column header) ---
             var data = pasteboard.data(forType: WorktreeReference.pasteboardType)
@@ -344,7 +328,7 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
             }
 
             // Re-register after rebuild so new hosting views don't shadow our type
-            splitView?.registerForDraggedTypes([WorktreeReference.pasteboardType, TerminalTabReference.pasteboardType])
+            splitView?.registerForDraggedTypes([WorktreeReference.pasteboardType])
             dragLogger.info("rebuildItems columnCount=\(columns.count)")
 
             // Equalize divider positions via controller
@@ -362,7 +346,7 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
                 for (index, column) in columns.enumerated() {
                     itemMap[index].host.rootView = makeView(for: column)
                 }
-                splitView?.registerForDraggedTypes([WorktreeReference.pasteboardType, TerminalTabReference.pasteboardType])
+                splitView?.registerForDraggedTypes([WorktreeReference.pasteboardType])
                 return
             }
 
@@ -405,7 +389,7 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
                 }
             }
 
-            splitView?.registerForDraggedTypes([WorktreeReference.pasteboardType, TerminalTabReference.pasteboardType])
+            splitView?.registerForDraggedTypes([WorktreeReference.pasteboardType])
             dragLogger.info("reconcile incremental columnCount=\(columns.count)")
 
             // Equalize divider positions via controller
@@ -427,7 +411,8 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
                     column: column,
                     paneManager: paneManager,
                     terminalSessionManager: terminalSessionManager,
-                    findWorktree: findWorktree
+                    findWorktree: findWorktree,
+                    isSharedLayout: isSharedLayout
                 )
             )
         }
