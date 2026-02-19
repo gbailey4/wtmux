@@ -24,6 +24,14 @@ enum ClaudeCodeStatus: String, Comparable {
     static func < (lhs: ClaudeCodeStatus, rhs: ClaudeCodeStatus) -> Bool {
         lhs.priority < rhs.priority
     }
+
+    func toWindowStatus() -> WindowExecutionStatus {
+        switch self {
+        case .idle, .done: .idle
+        case .thinking, .working: .thinking
+        case .needsAttention: .inputNeeded
+        }
+    }
 }
 
 @MainActor @Observable
@@ -54,12 +62,6 @@ final class ClaudeStatusManager {
                 self?.handleEvent(status: status, cwd: cwd, sessionId: sessionId, columnId: columnId)
             }
         }
-    }
-
-    /// Aggregate status for a worktree path (worst-status-wins across all columns). Used by sidebar.
-    func status(forWorktreePath path: String) -> ClaudeCodeStatus? {
-        let _ = version
-        return statusByPath[normalizePath(path)]
     }
 
     /// Per-column status. Returns the status for a specific column displaying the given worktree.

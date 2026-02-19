@@ -50,6 +50,7 @@ The main app target (`WTMux/`) contains the SwiftUI views organized by feature: 
 - **Transport abstraction:** All git/shell operations go through `CommandTransport` so the same code works for local and remote (SSH) repositories
 - **Actor isolation:** `GitService` and `ProcessManager` are actors; strict concurrency checking is enabled (`SWIFT_STRICT_CONCURRENCY: complete`)
 - **SwiftData persistence:** Models use `@Model` macro with cascade delete relationships (Project → Worktrees, Project → ProjectProfile → RunConfigurations)
+- **Terminal auto-start behavior:** `TerminalRepresentable` now waits for initial PTY output and sends a blank newline before typing auto-start commands (`claude`, etc.) so prompts from fish/zsh/bash aren’t overwritten. Keep that in mind when adjusting terminal start logic.
 
 ## VS Code / Cursor LSP Setup
 

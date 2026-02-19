@@ -52,11 +52,23 @@ final class SplitPaneManager {
         focusedWindow?.columns ?? []
     }
 
+    var expandedColumns: [WorktreeColumn] {
+        focusedWindow?.columns.filter { !$0.isMinimized } ?? []
+    }
+
+    var minimizedColumns: [WorktreeColumn] {
+        focusedWindow?.columns.filter { $0.isMinimized } ?? []
+    }
+
     var focusedColumn: WorktreeColumn? {
         guard let window = focusedWindow, let columnID = focusedColumnID else {
-            return focusedWindow?.columns.first
+            return focusedWindow?.columns.first { !$0.isMinimized }
         }
-        return window.columns.first { $0.id == columnID } ?? window.columns.first
+        let col = window.columns.first { $0.id == columnID }
+        if let col, col.isMinimized {
+            return window.columns.first { !$0.isMinimized }
+        }
+        return col ?? window.columns.first { !$0.isMinimized }
     }
 
     /// All worktree IDs currently visible in any column across all windows.
@@ -64,14 +76,13 @@ final class SplitPaneManager {
         Set(windows.flatMap { $0.columns.compactMap(\.worktreeID) })
     }
 
-    /// Returns the shared worktree ID when all columns in the focused window display the same worktree
-    /// and there are 2+ columns. Returns nil otherwise.
+    /// Returns the shared worktree ID when all expanded columns in the focused window display the same worktree
+    /// and there are 2+ expanded columns. Returns nil otherwise.
     var sharedWorktreeID: String? {
-        guard let window = focusedWindow else { return nil }
-        let columns = window.columns
-        guard columns.count >= 2 else { return nil }
-        let ids = columns.compactMap(\.worktreeID)
-        guard ids.count == columns.count else { return nil }
+        let expanded = expandedColumns
+        guard expanded.count >= 2 else { return nil }
+        let ids = expanded.compactMap(\.worktreeID)
+        guard ids.count == expanded.count else { return nil }
         let unique = Set(ids)
         return unique.count == 1 ? unique.first : nil
     }
@@ -326,22 +337,52 @@ final class SplitPaneManager {
         removeColumn(id: id)
     }
 
+    // MARK: - Minimize / Restore
+
+    func minimizeColumn(id: UUID) {
+        guard let col = column(for: id) else { return }
+        col.isMinimized = true
+        if focusedColumnID == id {
+            focusedColumnID = expandedColumns.first?.id
+        }
+        saveState()
+    }
+
+    func restoreColumn(id: UUID) {
+        guard let col = column(for: id) else { return }
+        col.isMinimized = false
+        focusedColumnID = col.id
+        saveState()
+    }
+
+    func swapMinimized(restoreColumnID: UUID) {
+        guard let currentFocused = focusedColumn else {
+            restoreColumn(id: restoreColumnID)
+            return
+        }
+        guard let restoreCol = column(for: restoreColumnID), restoreCol.isMinimized else { return }
+        currentFocused.isMinimized = true
+        restoreCol.isMinimized = false
+        focusedColumnID = restoreCol.id
+        saveState()
+    }
+
     func focusNextColumn() {
-        guard let window = focusedWindow else { return }
-        let allColumns = window.columns
-        guard let currentID = focusedColumnID,
-              let index = allColumns.firstIndex(where: { $0.id == currentID }) else { return }
-        let nextIndex = (index + 1) % allColumns.count
-        focusedColumnID = allColumns[nextIndex].id
+        let expanded = expandedColumns
+        guard expanded.count > 1,
+              let currentID = focusedColumnID,
+              let index = expanded.firstIndex(where: { $0.id == currentID }) else { return }
+        let nextIndex = (index + 1) % expanded.count
+        focusedColumnID = expanded[nextIndex].id
     }
 
     func focusPreviousColumn() {
-        guard let window = focusedWindow else { return }
-        let allColumns = window.columns
-        guard let currentID = focusedColumnID,
-              let index = allColumns.firstIndex(where: { $0.id == currentID }) else { return }
-        let prevIndex = (index - 1 + allColumns.count) % allColumns.count
-        focusedColumnID = allColumns[prevIndex].id
+        let expanded = expandedColumns
+        guard expanded.count > 1,
+              let currentID = focusedColumnID,
+              let index = expanded.firstIndex(where: { $0.id == currentID }) else { return }
+        let prevIndex = (index - 1 + expanded.count) % expanded.count
+        focusedColumnID = expanded[prevIndex].id
     }
 
     // MARK: - Move Operations (preserves column IDs and terminal sessions)
@@ -482,13 +523,15 @@ final class SplitPaneManager {
         let id: String
         let worktreeID: String?
         let showRunnerPanel: Bool
+        let isMinimized: Bool?
         // Legacy field for decoding compat
         let paneCount: Int?
 
-        init(id: String, worktreeID: String?, showRunnerPanel: Bool) {
+        init(id: String, worktreeID: String?, showRunnerPanel: Bool, isMinimized: Bool = false) {
             self.id = id
             self.worktreeID = worktreeID
             self.showRunnerPanel = showRunnerPanel
+            self.isMinimized = isMinimized
             self.paneCount = nil
         }
     }
@@ -507,7 +550,8 @@ final class SplitPaneManager {
                         ColumnSaved(
                             id: col.id.uuidString,
                             worktreeID: col.worktreeID,
-                            showRunnerPanel: col.showRunnerPanel
+                            showRunnerPanel: col.showRunnerPanel,
+                            isMinimized: col.isMinimized
                         )
                     }
                 )
@@ -541,7 +585,8 @@ final class SplitPaneManager {
                         WorktreeColumn(
                             id: UUID(uuidString: col.id) ?? UUID(),
                             worktreeID: col.worktreeID,
-                            showRunnerPanel: col.showRunnerPanel
+                            showRunnerPanel: col.showRunnerPanel,
+                            isMinimized: col.isMinimized ?? false
                         )
                     }
                 )

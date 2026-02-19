@@ -36,7 +36,7 @@ struct ColumnHeaderView: View {
     }
 
     private var showFocusBorder: Bool {
-        paneManager.columns.count > 1
+        paneManager.expandedColumns.count > 1
     }
 
     var body: some View {
@@ -77,6 +77,13 @@ struct ColumnHeaderView: View {
             Text("This column has running terminal processes. Closing it will terminate them.")
         }
         .contextMenu {
+            Button("Minimize") {
+                paneManager.minimizeColumn(id: column.id)
+            }
+            .disabled(column.worktreeID == nil)
+
+            Divider()
+
             Button("Move to New Window") {
                 paneManager.moveColumnToNewWindow(columnID: column.id)
             }
@@ -186,6 +193,21 @@ struct ColumnHeaderView: View {
     @ViewBuilder
     private var headerButtons: some View {
         HStack(spacing: 2) {
+            // Minimize button
+            if column.worktreeID != nil {
+                Button {
+                    paneManager.minimizeColumn(id: column.id)
+                } label: {
+                    Image(systemName: "minus")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Minimize Column")
+            }
+
             // New column button
             Button {
                 paneManager.addColumn(worktreeID: column.worktreeID, after: column.id)

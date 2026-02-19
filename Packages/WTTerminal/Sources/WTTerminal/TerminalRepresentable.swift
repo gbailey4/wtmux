@@ -89,6 +89,19 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
     /// Local event monitor for intercepting key events when Kitty mode is active.
     private var keyEventMonitor: Any?
 
+    /// Pending initial command waiting to be sent once the shell is idle.
+    private var pendingInitialCommand: String?
+
+    /// Timer that fires after PTY output goes quiet, used to detect shell readiness.
+    private var shellIdleTimer: Timer?
+
+    /// Maximum time to wait for shell idle before sending the initial command anyway.
+    private var shellIdleDeadline: Timer?
+
+    /// Earliest time the idle timer is allowed to fire, preventing false triggers
+    /// during gaps in shell initialization.
+    private var shellIdleEarliestFire: Date = .distantPast
+
     public init(workingDirectory: String, shellPath: String, initialCommand: String? = nil, deferExecution: Bool = false) {
         self.workingDirectory = workingDirectory
         self.shellPath = shellPath
@@ -147,6 +160,11 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
     }
 
     private func processReceivedData(_ slice: ArraySlice<UInt8>) {
+        // Reset the shell idle timer whenever output arrives.
+        if pendingInitialCommand != nil {
+            resetShellIdleTimer()
+        }
+
         let (filtered, commands) = Self.filterKittyKeyboardSequences(slice)
 
         for command in commands {
@@ -405,12 +423,46 @@ public class DeferredStartTerminalView: LocalProcessTerminalView {
             }
         }
 
-        // Send initial command after shell has time to initialize (interactive mode only)
+        // Queue initial command to be sent once the shell finishes initializing.
+        // We detect readiness by waiting for PTY output to go quiet for 200ms,
+        // but not before a 1.0s minimum wait to avoid false triggers on gaps
+        // during shell initialization. Hard deadline of 3s as a fallback.
         if !useCommandMode, !deferExecution, let command = initialCommand, !command.isEmpty {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-                self?.sendCommand(command)
+            pendingInitialCommand = command
+            shellIdleEarliestFire = Date().addingTimeInterval(1.0)
+            shellIdleDeadline = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.sendPendingInitialCommand()
+                }
             }
         }
+    }
+
+    /// Resets the idle timer. Called each time PTY output is received.
+    /// Uses a 200ms quiet period, but won't fire before `shellIdleEarliestFire`
+    /// to avoid false triggers on gaps during shell initialization.
+    private func resetShellIdleTimer() {
+        shellIdleTimer?.invalidate()
+        let delay = max(0.2, shellIdleEarliestFire.timeIntervalSinceNow)
+        shellIdleTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.sendPendingInitialCommand()
+            }
+        }
+    }
+
+    /// Sends the pending initial command and cancels all idle-detection timers.
+    private func sendPendingInitialCommand() {
+        guard let command = pendingInitialCommand else { return }
+        pendingInitialCommand = nil
+        shellIdleTimer?.invalidate()
+        shellIdleTimer = nil
+        shellIdleDeadline?.invalidate()
+        shellIdleDeadline = nil
+        // Send an empty newline first so any partially rendered prompt finishes
+        // before we type the auto-start command (prevents prompt+command overlap).
+        send(txt: "\n")
+        sendCommand(command)
     }
 
     /// Sends a command string to the PTY followed by a newline.

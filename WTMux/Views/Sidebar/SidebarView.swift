@@ -15,7 +15,6 @@ struct SidebarView: View {
     let paneManager: SplitPaneManager
     @Binding var showingAddProject: Bool
     let terminalSessionManager: TerminalSessionManager
-    let claudeStatusManager: ClaudeStatusManager
 
     private var selectedWorktreeID: Binding<String?> {
         Binding(
@@ -76,7 +75,6 @@ struct SidebarView: View {
                             isDeleting: deletingWorktreePaths.contains(worktree.path),
                             isRunning: runningWorktreeIds.contains(worktree.path),
                             isVisibleInColumn: paneManager.visibleWorktreeIDs.contains(worktree.path),
-                            claudeStatus: claudeStatusManager.status(forWorktreePath: worktree.path),
                             hasRunConfigurations: hasRunConfigurations(for: worktree),
                             onStartRunners: {
                                 selectedWorktreeID.wrappedValue = worktree.path
@@ -669,7 +667,6 @@ struct WorktreeRow: View {
     var isDeleting: Bool = false
     var isRunning: Bool = false
     var isVisibleInColumn: Bool = false
-    var claudeStatus: ClaudeCodeStatus? = nil
     var hasRunConfigurations: Bool = false
     var onStartRunners: (() -> Void)? = nil
     var onStopRunners: (() -> Void)? = nil
@@ -688,14 +685,9 @@ struct WorktreeRow: View {
                     .font(.subheadline)
             }
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(worktree.branchName)
-                        .font(.subheadline)
-                        .lineLimit(1)
-                    if !isDeleting, let claudeStatus {
-                        claudeBadge(claudeStatus)
-                    }
-                }
+                Text(worktree.branchName)
+                    .font(.subheadline)
+                    .lineLimit(1)
                 Text(worktree.baseBranch)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -764,33 +756,6 @@ struct WorktreeRow: View {
         }
     }
 
-    @ViewBuilder
-    private func claudeBadge(_ status: ClaudeCodeStatus) -> some View {
-        switch status {
-        case .idle:
-            Image(systemName: "circle.fill")
-                .font(.system(size: 8))
-                .foregroundStyle(.secondary)
-        case .thinking:
-            Image(systemName: "circle.fill")
-                .font(.system(size: 8))
-                .foregroundStyle(.purple)
-                .symbolEffect(.pulse)
-        case .working:
-            Image(systemName: "circle.fill")
-                .font(.system(size: 8))
-                .foregroundStyle(.blue)
-                .symbolEffect(.pulse)
-        case .needsAttention:
-            Image(systemName: "circle.fill")
-                .font(.system(size: 8))
-                .foregroundStyle(.orange)
-        case .done:
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 10))
-                .foregroundStyle(.green)
-        }
-    }
 }
 
 // MARK: - Delete Worktree Sheet

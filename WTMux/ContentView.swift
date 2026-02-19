@@ -1,5 +1,8 @@
 import AppKit
 import SwiftUI
+@preconcurrency import Dispatch
+@preconcurrency import ObjectiveC
+import Darwin
 import SwiftData
 import WTCore
 import WTGit
@@ -56,6 +59,7 @@ struct ContentView: View {
     @State private var renamingWindowID: UUID?
     @State private var windowRenameText: String = ""
     @FocusState private var isWindowRenameFocused: Bool
+    @State private var configWatcher = ConfigWatcher()
 
     private var currentTheme: TerminalTheme {
         themeManager.theme(forId: terminalThemeId)
@@ -99,8 +103,7 @@ struct ContentView: View {
                 projects: projects,
                 paneManager: paneManager,
                 showingAddProject: $showingAddProject,
-                terminalSessionManager: terminalSessionManager,
-                claudeStatusManager: claudeStatusManager
+                terminalSessionManager: terminalSessionManager
             )
             .frame(minWidth: sidebarCollapsed ? 0 : 200, idealWidth: 240, maxWidth: 320)
             .background { SidebarCollapser(isCollapsed: sidebarCollapsed) }
@@ -126,11 +129,11 @@ struct ContentView: View {
                         .overlay(alignment: .topTrailing) {
                             if changedFileCount.wrappedValue > 0 {
                                 Text("\(changedFileCount.wrappedValue)")
-                                    .font(.system(size: 11, weight: .bold))
+                                    .font(.system(size: 9, weight: .medium))
                                     .foregroundStyle(.white)
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 1)
-                                    .background(Color.accentColor, in: Capsule())
+                                    .padding(.horizontal, 3)
+                                    .padding(.vertical, 0.5)
+                                    .background(Color.secondary.opacity(0.6), in: Capsule())
                                     .offset(x: 8, y: -8)
                             }
                         }
@@ -176,6 +179,13 @@ struct ContentView: View {
             Button("Move to Previous Window") { paneManager.moveColumnToPreviousWindow() }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
                 .hidden()
+            Button("Minimize Column") {
+                if let id = paneManager.focusedColumnID {
+                    paneManager.minimizeColumn(id: id)
+                }
+            }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+                .hidden()
         }
         .task {
             appDelegate.terminalSessionManager = terminalSessionManager
@@ -183,6 +193,7 @@ struct ContentView: View {
             await checkGitAvailability()
             backfillProjectColors()
             backfillSortOrders()
+            configWatcher.update(projects: projects, modelContext: modelContext)
         }
         .sheet(isPresented: $showingAddProject) {
             AddProjectView(
@@ -199,9 +210,14 @@ struct ContentView: View {
             importObserver.pendingImportConfig = nil
             importProject(repoPath: repoPath, config: config)
         }
-        .task { registerWorktreePaths() }
-        .task { await pollForConfigFiles() }
-        .onChange(of: projects) { registerWorktreePaths() }
+        .task {
+            registerWorktreePaths()
+            configWatcher.update(projects: projects, modelContext: modelContext)
+        }
+        .onChange(of: projects) { _, newValue in
+            registerWorktreePaths()
+            configWatcher.update(projects: newValue, modelContext: modelContext)
+        }
         .onChange(of: totalWorktreeCount) { registerWorktreePaths() }
         .alert("Close Window?", isPresented: $showCloseWindowAlert) {
             Button("Close", role: .destructive) {
@@ -263,19 +279,6 @@ struct ContentView: View {
             }
             let importService = ProjectImportService()
             importService.importProject(repoPath: repoPath, config: resolvedConfig, in: modelContext)
-        }
-    }
-
-    private func pollForConfigFiles() async {
-        let configService = ConfigService()
-        let importService = ProjectImportService()
-        while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(2))
-            for project in projects where project.needsClaudeConfig == true {
-                if let config = await configService.readConfig(forRepo: project.repoPath) {
-                    importService.importProject(repoPath: project.repoPath, config: config, in: modelContext)
-                }
-            }
         }
     }
 
@@ -416,13 +419,23 @@ struct ContentView: View {
                                 Divider()
                             }
 
-                            SplitPaneContainerView(
+                            MinimizedColumnsContainer(
                                 paneManager: paneManager,
                                 terminalSessionManager: terminalSessionManager,
-                                findWorktree: findWorktree,
-                                isSharedLayout: sharedWorktree != nil
+                                findWorktree: findWorktree
                             )
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                            if !paneManager.expandedColumns.isEmpty {
+                                SplitPaneContainerView(
+                                    paneManager: paneManager,
+                                    terminalSessionManager: terminalSessionManager,
+                                    findWorktree: findWorktree,
+                                    isSharedLayout: sharedWorktree != nil
+                                )
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            } else {
+                                Spacer()
+                            }
 
                             if let worktree = sharedWorktree {
                                 Divider()
@@ -498,7 +511,12 @@ struct ContentView: View {
     @ViewBuilder
     private func windowTab(for window: WindowState) -> some View {
         let isSelected = paneManager.focusedWindowID == window.id
+        let _ = claudeStatusManager.version
+        let windowStatus = window.aggregateExecutionStatus(claudeStatusManager: claudeStatusManager)
         HStack(spacing: 4) {
+            if windowStatus != .idle {
+                windowStatusIndicator(windowStatus)
+            }
             if case .diff = window.kind {
                 Image(systemName: "doc.text.magnifyingglass")
                     .font(.system(size: 11))
@@ -646,6 +664,27 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
+    private func windowStatusIndicator(_ status: WindowExecutionStatus) -> some View {
+        switch status {
+        case .idle:
+            EmptyView()
+        case .thinking:
+            Image(systemName: "circle.fill")
+                .font(.system(size: 6))
+                .foregroundStyle(.yellow)
+                .symbolEffect(.pulse)
+        case .inputNeeded:
+            Image(systemName: "circle.fill")
+                .font(.system(size: 6))
+                .foregroundStyle(.blue)
+        case .error:
+            Image(systemName: "circle.fill")
+                .font(.system(size: 6))
+                .foregroundStyle(.red)
+        }
+    }
+
     private func findWorktree(id: String) -> Worktree? {
         for project in projects {
             if let wt = project.worktrees.first(where: { $0.path == id }) {
@@ -662,12 +701,12 @@ struct ContentView: View {
 /// `setPosition(_:ofDividerAt:)`. Placed as a `.background` on the sidebar
 /// so its NSView is a descendant of the NSSplitView.
 /// Also observes sidebar frame changes to persist the user's preferred width.
-private struct SidebarCollapser: NSViewRepresentable {
-    var isCollapsed: Bool
+    private struct SidebarCollapser: NSViewRepresentable {
+        var isCollapsed: Bool
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+        func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeNSView(context: Context) -> NSView { NSView() }
+        func makeNSView(context: Context) -> NSView { NSView() }
 
     func updateNSView(_ nsView: NSView, context: Context) {
         DispatchQueue.main.async {
@@ -694,44 +733,46 @@ private struct SidebarCollapser: NSViewRepresentable {
         return nil
     }
 
-    final class Coordinator {
-        var hasRestoredWidth = false
-        private var observation: NSObjectProtocol?
-        private var debounceWork: DispatchWorkItem?
+        @MainActor final class Coordinator: NSObject {
+            var hasRestoredWidth = false
+            private var isObserving = false
+            nonisolated(unsafe) private var debounceWork: DispatchWorkItem?
 
-        func installObserver(on splitView: NSSplitView) {
-            guard observation == nil, let sidebarView = splitView.subviews.first else { return }
-            sidebarView.postsFrameChangedNotifications = true
-            observation = NotificationCenter.default.addObserver(
-                forName: NSView.frameDidChangeNotification,
-                object: sidebarView,
-                queue: .main
-            ) { [weak self] notification in
-                guard let view = notification.object as? NSView else { return }
+            func installObserver(on splitView: NSSplitView) {
+                guard !isObserving, let sidebarView = splitView.subviews.first else { return }
+                isObserving = true
+                sidebarView.postsFrameChangedNotifications = true
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(sidebarFrameChanged),
+                    name: NSView.frameDidChangeNotification,
+                    object: sidebarView
+                )
+            }
+
+            @objc private func sidebarFrameChanged(_ note: Notification) {
+                guard let view = note.object as? NSView else { return }
                 let width = view.frame.width
                 if width >= 200 {
-                    self?.debounceSave(width: width)
+                    debounceSave(width: width)
                 }
             }
-        }
 
-        private func debounceSave(width: CGFloat) {
-            debounceWork?.cancel()
-            let item = DispatchWorkItem {
-                UserDefaults.standard.set(Double(width), forKey: "sidebarWidth")
+            private func debounceSave(width: CGFloat) {
+                debounceWork?.cancel()
+                let item = DispatchWorkItem {
+                    UserDefaults.standard.set(Double(width), forKey: "sidebarWidth")
+                }
+                debounceWork = item
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
             }
-            debounceWork = item
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
-        }
 
-        deinit {
-            if let observation {
-                NotificationCenter.default.removeObserver(observation)
+            deinit {
+                NotificationCenter.default.removeObserver(self)
+                debounceWork?.cancel()
             }
-            debounceWork?.cancel()
         }
     }
-}
 
 // MARK: - WorktreeDropZone
 
@@ -836,7 +877,7 @@ private struct WindowTabDropTarget: NSViewRepresentable {
             isHighlighted = false
             needsDisplay = true
 
-            guard let (ref, sourceColumnUUID) = decodeColumnDrag(from: sender),
+            guard let (_, sourceColumnUUID) = decodeColumnDrag(from: sender),
                   let paneManager else { return false }
 
             // Don't move to same window
@@ -878,5 +919,118 @@ private struct WindowTabDropTarget: NSViewRepresentable {
             }
             return (ref, sourceColumnUUID)
         }
+    }
+}
+
+// MARK: - ConfigWatcher
+
+/// Observes repo directories for `.wtmux/config.json` changes so we can
+/// import projects as soon as Claude finishes writing configs without polling.
+@MainActor
+private final class ConfigWatcher {
+    private var watchers: [String: RepoWatcher] = [:]
+    private var pendingImports: Set<String> = []
+    private let configService = ConfigService()
+    private let importService = ProjectImportService()
+
+    func update(projects: [Project], modelContext: ModelContext) {
+        let reposNeedingConfig = projects
+            .filter { $0.needsClaudeConfig == true && !$0.repoPath.isEmpty }
+            .map(\.repoPath)
+        let needed = Set(reposNeedingConfig)
+
+        // Stop watching repos that no longer need Claude config
+        for (path, watcher) in watchers where !needed.contains(path) {
+            watcher.cancel()
+            watchers.removeValue(forKey: path)
+        }
+
+        // Start watching new repos
+        for path in needed where watchers[path] == nil {
+            guard let watcher = RepoWatcher(repoPath: path, onChange: { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    await self.handleChange(for: path, modelContext: modelContext)
+                }
+            }) else { continue }
+            watchers[path] = watcher
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.handleChange(for: path, modelContext: modelContext)
+            }
+        }
+    }
+
+    private func handleChange(for repoPath: String, modelContext: ModelContext) async {
+        watchers[repoPath]?.ensureWTmuxWatcher()
+        if pendingImports.contains(repoPath) { return }
+        pendingImports.insert(repoPath)
+        defer { pendingImports.remove(repoPath) }
+
+        guard let config = await configService.readConfig(forRepo: repoPath) else { return }
+        importService.importProject(repoPath: repoPath, config: config, in: modelContext)
+    }
+}
+
+private final class RepoWatcher {
+    private let repoPath: String
+    private let handler: () -> Void
+    private var monitors: [DirectoryMonitor] = []
+
+    init?(repoPath: String, onChange handler: @escaping () -> Void) {
+        self.repoPath = repoPath
+        self.handler = handler
+
+        guard let repoMonitor = DirectoryMonitor(path: repoPath, handler: handler) else {
+            return nil
+        }
+        monitors.append(repoMonitor)
+        ensureWTmuxWatcher()
+    }
+
+    func ensureWTmuxWatcher() {
+        let wtPath = (repoPath as NSString).appendingPathComponent(".wtmux")
+        guard FileManager.default.fileExists(atPath: wtPath) else { return }
+        guard !monitors.contains(where: { $0.path == wtPath }) else { return }
+        if let monitor = DirectoryMonitor(path: wtPath, handler: handler) {
+            monitors.append(monitor)
+        }
+    }
+
+    func cancel() {
+        monitors.forEach { $0.cancel() }
+        monitors.removeAll()
+    }
+}
+
+private final class DirectoryMonitor {
+    let path: String
+    private let descriptor: CInt
+    private let source: DispatchSourceFileSystemObject
+
+    init?(path: String, handler: @escaping () -> Void) {
+        self.path = path
+        descriptor = open(path, O_EVTONLY)
+        guard descriptor >= 0 else { return nil }
+
+        let queue = DispatchQueue(label: "com.wtmux.directorymonitor.\(UUID().uuidString)")
+        source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor,
+            eventMask: [.write, .extend, .attrib, .delete, .rename, .link],
+            queue: queue
+        )
+        source.setEventHandler(handler: handler)
+        source.setCancelHandler { [descriptor = self.descriptor] in
+            close(descriptor)
+        }
+        source.resume()
+    }
+
+    deinit {
+        source.cancel()
+    }
+
+    func cancel() {
+        source.cancel()
     }
 }

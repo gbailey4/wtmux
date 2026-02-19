@@ -72,7 +72,7 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
 
         context.coordinator.splitView = splitView
         context.coordinator.paneManager = paneManager
-        context.coordinator.rebuildItems(controller: controller, columns: paneManager.columns)
+        context.coordinator.rebuildItems(controller: controller, columns: paneManager.expandedColumns)
 
         splitView.handleDrag = { [weak coordinator = context.coordinator] info in
             coordinator?.handleDragUpdated(info) ?? .generic
@@ -92,7 +92,7 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
         context.coordinator.terminalSessionManager = terminalSessionManager
         context.coordinator.paneManager = paneManager
         context.coordinator.isSharedLayout = isSharedLayout
-        context.coordinator.reconcile(controller: controller, columns: paneManager.columns)
+        context.coordinator.reconcile(controller: controller, columns: paneManager.expandedColumns)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -141,7 +141,7 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
 
             // Find which column the cursor is over
             var hitColumn = false
-            let isSingleColumn = paneManager.columns.count == 1
+            let isSingleColumn = paneManager.expandedColumns.count == 1
             for entry in itemMap {
                 let hostView = entry.host.view
                 let columnFrame = hostView.convert(hostView.bounds, to: splitView)
@@ -181,7 +181,7 @@ struct SplitPaneContainerView: NSViewControllerRepresentable {
             // Find target column and its drop zone
             var targetColumn: WorktreeColumn?
             var targetZone: DropZone = .none
-            let isSingleColumn = paneManager.columns.count == 1
+            let isSingleColumn = paneManager.expandedColumns.count == 1
 
             for entry in itemMap {
                 let hostView = entry.host.view

@@ -24,6 +24,9 @@ final class ClaudeIntegrationService {
             mcpRegistered = isMCPRegistered(in: claudeConfig)
             let settingsConfig = home.appendingPathComponent(".claude/settings.json")
             hooksRegistered = isHooksRegistered(in: settingsConfig)
+            if hooksRegistered && hooksNeedPathUpdate(in: settingsConfig) {
+                try? addHooksRegistration(to: settingsConfig)
+            }
         } else {
             mcpRegistered = false
             hooksRegistered = false
@@ -166,7 +169,7 @@ final class ClaudeIntegrationService {
         let entry = hookEntry()
 
         // Simple event hooks (no matcher)
-        for event in ["Stop", "SessionStart", "SessionEnd", "UserPromptSubmit", "PermissionRequest"] {
+        for event in ["Stop", "SessionStart", "SessionEnd", "UserPromptSubmit", "PermissionRequest", "PreToolUse", "PostToolUse"] {
             var eventHooks = hooks[event] as? [[String: Any]] ?? []
             // Remove any existing wtmux-hook entries
             eventHooks.removeAll { group in
@@ -208,7 +211,7 @@ final class ClaudeIntegrationService {
             return
         }
 
-        for event in ["Stop", "SessionStart", "SessionEnd", "UserPromptSubmit", "PermissionRequest", "Notification"] {
+        for event in ["Stop", "SessionStart", "SessionEnd", "UserPromptSubmit", "PermissionRequest", "Notification", "PreToolUse", "PostToolUse"] {
             guard var eventHooks = hooks[event] as? [[String: Any]] else { continue }
             eventHooks.removeAll { group in
                 guard let innerHooks = group["hooks"] as? [[String: Any]] else { return false }
@@ -232,6 +235,27 @@ final class ClaudeIntegrationService {
         ) {
             try? data.write(to: configURL, options: .atomic)
         }
+    }
+
+    /// Returns true if hooks are registered but the binary path doesn't match the current build.
+    private func hooksNeedPathUpdate(in configURL: URL) -> Bool {
+        guard let data = try? Data(contentsOf: configURL),
+              let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let hooks = config["hooks"] as? [String: Any] else { return false }
+        let currentPath = hookBinaryPath()
+        for (_, groups) in hooks {
+            guard let groups = groups as? [[String: Any]] else { continue }
+            for group in groups {
+                guard let innerHooks = group["hooks"] as? [[String: Any]] else { continue }
+                for hook in innerHooks {
+                    if let cmd = hook["command"] as? String,
+                       cmd.contains("wtmux-hook"), cmd != currentPath {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
     }
 
     private func isHooksRegistered(in configURL: URL) -> Bool {

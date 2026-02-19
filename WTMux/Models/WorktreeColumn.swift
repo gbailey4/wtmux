@@ -7,6 +7,7 @@ final class WorktreeColumn: Identifiable {
     var showRunnerPanel: Bool
     var showRightPanel: Bool
     var changedFileCount: Int
+    var isMinimized: Bool
     var dropZone: DropZone = .none
 
     init(
@@ -14,12 +15,14 @@ final class WorktreeColumn: Identifiable {
         worktreeID: String? = nil,
         showRunnerPanel: Bool = false,
         showRightPanel: Bool = false,
-        changedFileCount: Int = 0
+        changedFileCount: Int = 0,
+        isMinimized: Bool = false
     ) {
         self.id = id
         self.worktreeID = worktreeID
         self.showRunnerPanel = showRunnerPanel
         self.showRightPanel = showRightPanel
         self.changedFileCount = changedFileCount
+        self.isMinimized = isMinimized
     }
 }
