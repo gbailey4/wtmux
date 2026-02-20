@@ -18,14 +18,14 @@ struct SidebarView: View {
 
     private var selectedWorktreeID: Binding<String?> {
         Binding(
-            get: { paneManager.focusedColumn?.worktreeID },
+            get: { paneManager.focusedPane?.worktreeID },
             set: { newValue in
                 guard let worktreeID = newValue else { return }
 
                 // If already open anywhere, focus it
                 if let loc = paneManager.findWorktreeLocation(worktreeID) {
                     paneManager.focusedWindowID = loc.windowID
-                    paneManager.focusedColumnID = loc.columnID
+                    paneManager.focusedPaneID = loc.paneID
                     return
                 }
 
@@ -74,11 +74,11 @@ struct SidebarView: View {
                             worktree: worktree,
                             isDeleting: deletingWorktreePaths.contains(worktree.path),
                             isRunning: runningWorktreeIds.contains(worktree.path),
-                            isVisibleInColumn: paneManager.visibleWorktreeIDs.contains(worktree.path),
+                            isVisibleInPane: paneManager.visibleWorktreeIDs.contains(worktree.path),
                             hasRunConfigurations: hasRunConfigurations(for: worktree),
                             onStartRunners: {
                                 selectedWorktreeID.wrappedValue = worktree.path
-                                paneManager.focusedColumn?.showRunnerPanel = true
+                                paneManager.focusedPane?.showRunnerPanel = true
                                 requestStartRunners(for: worktree)
                             },
                             onStopRunners: { stopRunners(for: worktree) }
@@ -148,12 +148,12 @@ struct SidebarView: View {
                         if let firstWorktree = project.worktrees.sorted(by: { $0.sortOrder < $1.sortOrder }).first {
                             Button {
                                 selectedWorktreeID.wrappedValue = firstWorktree.path
-                                // Defer to next run loop so the column is created before we add the tab
+                                // Defer to next run loop so the pane is created before we add the tab
                                 DispatchQueue.main.async {
                                     if let loc = paneManager.findWorktreeLocation(firstWorktree.path) {
                                         ClaudeConfigHelper.openConfigTerminal(
                                             terminalSessionManager: terminalSessionManager,
-                                            columnId: loc.columnID.uuidString,
+                                            paneId: loc.paneID.uuidString,
                                             worktreeId: firstWorktree.path,
                                             workingDirectory: firstWorktree.path,
                                             repoPath: project.repoPath
@@ -346,7 +346,7 @@ struct SidebarView: View {
         } label: {
             Label("Open in New Split", systemImage: "rectangle.split.2x1")
         }
-        .disabled(paneManager.columns.count >= 5)
+        .disabled(paneManager.panes.count >= 5)
 
         Divider()
 
@@ -666,7 +666,7 @@ struct WorktreeRow: View {
     let worktree: Worktree
     var isDeleting: Bool = false
     var isRunning: Bool = false
-    var isVisibleInColumn: Bool = false
+    var isVisibleInPane: Bool = false
     var hasRunConfigurations: Bool = false
     var onStartRunners: (() -> Void)? = nil
     var onStopRunners: (() -> Void)? = nil
@@ -722,11 +722,11 @@ struct WorktreeRow: View {
                     .foregroundStyle(.green)
                     .help("Runners active")
             }
-            if !isDeleting, isVisibleInColumn {
+            if !isDeleting, isVisibleInPane {
                 Circle()
                     .fill(Color.accentColor)
                     .frame(width: 8, height: 8)
-                    .help("Visible in column")
+                    .help("Visible in pane")
             }
         }
         .padding(.vertical, 2)

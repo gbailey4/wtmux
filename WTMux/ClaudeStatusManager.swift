@@ -40,8 +40,8 @@ final class ClaudeStatusManager {
 
     /// Per-worktree-path aggregate status (used by sidebar).
     private var statusByPath: [String: ClaudeCodeStatus] = [:]
-    /// Per-column status: statusByColumn[worktreePath][columnId] = status.
-    private var statusByColumn: [String: [String: ClaudeCodeStatus]] = [:]
+    /// Per-pane status: statusByPane[worktreePath][paneId] = status.
+    private var statusByPane: [String: [String: ClaudeCodeStatus]] = [:]
 
     private var sessionsByPath: [String: String] = [:]
     var knownWorktreePaths: Set<String> = []
@@ -57,17 +57,17 @@ final class ClaudeStatusManager {
             let status = notification.userInfo?["status"] as? String
             let cwd = notification.userInfo?["cwd"] as? String
             let sessionId = notification.userInfo?["sessionId"] as? String
-            let columnId = notification.userInfo?["columnId"] as? String
+            let paneId = notification.userInfo?["paneId"] as? String
             MainActor.assumeIsolated {
-                self?.handleEvent(status: status, cwd: cwd, sessionId: sessionId, columnId: columnId)
+                self?.handleEvent(status: status, cwd: cwd, sessionId: sessionId, paneId: paneId)
             }
         }
     }
 
-    /// Per-column status. Returns the status for a specific column displaying the given worktree.
-    func status(forColumn columnId: String, worktreePath path: String) -> ClaudeCodeStatus? {
+    /// Per-pane status. Returns the status for a specific pane displaying the given worktree.
+    func status(forPane paneId: String, worktreePath path: String) -> ClaudeCodeStatus? {
         let _ = version
-        return statusByColumn[normalizePath(path)]?[columnId]
+        return statusByPane[normalizePath(path)]?[paneId]
     }
 
     func registerWorktreePaths(_ paths: Set<String>) {
@@ -84,7 +84,7 @@ final class ClaudeStatusManager {
         return path
     }
 
-    private func handleEvent(status statusRaw: String?, cwd rawCwd: String?, sessionId: String?, columnId: String?) {
+    private func handleEvent(status statusRaw: String?, cwd rawCwd: String?, sessionId: String?, paneId: String?) {
         guard let statusRaw, let rawCwd else {
             logger.warning("Received notification with missing status or cwd")
             return
@@ -93,14 +93,14 @@ final class ClaudeStatusManager {
         let cwd = normalizePath(rawCwd)
         let sessionId = sessionId ?? ""
 
-        logger.info("Received event: status=\(statusRaw) cwd=\(cwd) session=\(sessionId) column=\(columnId ?? "nil")")
+        logger.info("Received event: status=\(statusRaw) cwd=\(cwd) session=\(sessionId) pane=\(paneId ?? "nil")")
 
         guard let worktreePath = matchWorktreePath(for: cwd) else {
             logger.warning("No worktree match for cwd=\(cwd). Known paths: \(self.knownWorktreePaths.sorted())")
             return
         }
 
-        let timerKey = columnId.map { "\(worktreePath):\($0)" } ?? worktreePath
+        let timerKey = paneId.map { "\(worktreePath):\($0)" } ?? worktreePath
 
         // Cancel any pending clear timer
         clearTimers[timerKey]?.invalidate()
@@ -108,10 +108,10 @@ final class ClaudeStatusManager {
 
         switch statusRaw {
         case "sessionEnded":
-            if let columnId {
-                statusByColumn[worktreePath]?.removeValue(forKey: columnId)
-                if statusByColumn[worktreePath]?.isEmpty == true {
-                    statusByColumn.removeValue(forKey: worktreePath)
+            if let paneId {
+                statusByPane[worktreePath]?.removeValue(forKey: paneId)
+                if statusByPane[worktreePath]?.isEmpty == true {
+                    statusByPane.removeValue(forKey: worktreePath)
                 }
             }
             // Recompute aggregate
@@ -119,8 +119,8 @@ final class ClaudeStatusManager {
             sessionsByPath.removeValue(forKey: timerKey)
 
         case "done":
-            if let columnId {
-                statusByColumn[worktreePath, default: [:]][columnId] = .done
+            if let paneId {
+                statusByPane[worktreePath, default: [:]][paneId] = .done
             }
             recomputeAggregate(for: worktreePath, fallback: .done)
             sessionsByPath[timerKey] = sessionId
@@ -128,9 +128,9 @@ final class ClaudeStatusManager {
             // Transition to idle after 30 seconds
             let timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    if let columnId {
-                        if self?.statusByColumn[worktreePath]?[columnId] == .done {
-                            self?.statusByColumn[worktreePath]?[columnId] = .idle
+                    if let paneId {
+                        if self?.statusByPane[worktreePath]?[paneId] == .done {
+                            self?.statusByPane[worktreePath]?[paneId] = .idle
                             self?.recomputeAggregate(for: worktreePath)
                             self?.version += 1
                         }
@@ -145,8 +145,8 @@ final class ClaudeStatusManager {
 
         default:
             if let status = ClaudeCodeStatus(rawValue: statusRaw) {
-                if let columnId {
-                    statusByColumn[worktreePath, default: [:]][columnId] = status
+                if let paneId {
+                    statusByPane[worktreePath, default: [:]][paneId] = status
                 }
                 recomputeAggregate(for: worktreePath, fallback: status)
                 sessionsByPath[timerKey] = sessionId
@@ -154,13 +154,13 @@ final class ClaudeStatusManager {
         }
 
         version += 1
-        logger.info("Status updated: worktree=\(worktreePath) column=\(columnId ?? "aggregate") status=\(self.statusByPath[worktreePath]?.rawValue ?? "cleared")")
+        logger.info("Status updated: worktree=\(worktreePath) pane=\(paneId ?? "aggregate") status=\(self.statusByPath[worktreePath]?.rawValue ?? "cleared")")
     }
 
-    /// Recomputes the aggregate status for a worktree path from all column statuses.
+    /// Recomputes the aggregate status for a worktree path from all pane statuses.
     private func recomputeAggregate(for worktreePath: String, fallback: ClaudeCodeStatus? = nil) {
-        if let columnStatuses = statusByColumn[worktreePath], !columnStatuses.isEmpty {
-            statusByPath[worktreePath] = columnStatuses.values.max()
+        if let paneStatuses = statusByPane[worktreePath], !paneStatuses.isEmpty {
+            statusByPath[worktreePath] = paneStatuses.values.max()
         } else if let fallback {
             statusByPath[worktreePath] = fallback
         } else {

@@ -6,12 +6,12 @@ import WTTransport
 
 struct WorktreeDetailView: View {
     let worktree: Worktree
-    let columnId: String
+    let paneId: String
     let terminalSessionManager: TerminalSessionManager
     let paneManager: SplitPaneManager
     @Binding var showRightPanel: Bool
     @Binding var changedFileCount: Int
-    var isColumnFocused: Bool = true
+    var isPaneFocused: Bool = true
 
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
     @Environment(ThemeManager.self) private var themeManager
@@ -23,11 +23,11 @@ struct WorktreeDetailView: View {
     private var worktreeId: String { worktree.path }
 
     private var terminalSession: TerminalSession? {
-        terminalSessionManager.terminalSession(forColumn: columnId)
+        terminalSessionManager.terminalSession(forPane: paneId)
     }
 
-    private var columnUUID: UUID {
-        UUID(uuidString: columnId) ?? UUID()
+    private var paneUUID: UUID {
+        UUID(uuidString: paneId) ?? UUID()
     }
 
     var body: some View {
@@ -40,13 +40,13 @@ struct WorktreeDetailView: View {
                 ChangesPanel(
                     worktree: worktree,
                     paneManager: paneManager,
-                    columnID: columnUUID,
+                    paneID: paneUUID,
                     changedFileCount: $changedFileCount
                 )
                 .frame(width: 400)
             }
         }
-        .task(id: "\(worktreeId)-\(columnId)") {
+        .task(id: "\(worktreeId)-\(paneId)") {
             changedFileCount = 0
             ensureTerminal()
             let git = GitService(transport: LocalTransport(), repoPath: worktree.path)
@@ -57,7 +57,7 @@ struct WorktreeDetailView: View {
     }
 
     private func ensureTerminal() {
-        guard terminalSessionManager.terminalSession(forColumn: columnId) == nil else { return }
+        guard terminalSessionManager.terminalSession(forPane: paneId) == nil else { return }
 
         let startCommand: String? = {
             guard let cmd = worktree.project?.profile?.terminalStartCommand, !cmd.isEmpty else { return nil }
@@ -65,7 +65,7 @@ struct WorktreeDetailView: View {
         }()
 
         _ = terminalSessionManager.createTerminal(
-            forColumn: columnId,
+            forPane: paneId,
             worktreeId: worktreeId,
             workingDirectory: worktree.path,
             initialCommand: startCommand
@@ -77,7 +77,7 @@ struct WorktreeDetailView: View {
     @ViewBuilder
     private var terminalContentView: some View {
         if let session = terminalSession {
-            TerminalRepresentable(session: session, isActive: isColumnFocused, theme: currentTheme)
+            TerminalRepresentable(session: session, isActive: isPaneFocused, theme: currentTheme)
                 .padding(.leading, 8)
                 .background(currentTheme.background.toColor())
         } else {

@@ -369,12 +369,12 @@ struct ProjectSettingsView: View {
             Button {
                 let worktree = project.worktrees.sorted(by: { $0.sortOrder < $1.sortOrder }).first!
                 dismiss()
-                // Defer so the column is available after sheet dismissal
+                // Defer so the pane is available after sheet dismissal
                 DispatchQueue.main.async {
                     if let loc = paneManager.findWorktreeLocation(worktree.path) {
                         ClaudeConfigHelper.openConfigTerminal(
                             terminalSessionManager: terminalSessionManager,
-                            columnId: loc.columnID.uuidString,
+                            paneId: loc.paneID.uuidString,
                             worktreeId: worktree.path,
                             workingDirectory: worktree.path,
                             repoPath: repoPath

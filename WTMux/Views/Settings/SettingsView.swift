@@ -7,6 +7,7 @@ struct SettingsView: View {
     @AppStorage("terminalFontSize") private var terminalFontSize = 13.0
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
     @AppStorage("terminalScrollbackLines") private var terminalScrollbackLines = 5000
+    @AppStorage("promptForPaneLabel") private var promptForPaneLabel = true
 
     @State private var customEditors = ExternalEditor.customEditors
     @State private var hiddenEditorIds = ExternalEditor.hiddenEditorIds
@@ -90,6 +91,10 @@ struct SettingsView: View {
                     Stepper("", value: $terminalScrollbackLines, in: 500...50_000, step: 500)
                         .labelsHidden()
                 }
+            }
+
+            Section("Panes") {
+                Toggle("Prompt for label when creating new panes", isOn: $promptForPaneLabel)
             }
 
             Section("Theme") {

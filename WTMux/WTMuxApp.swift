@@ -39,6 +39,7 @@ struct WTMuxApp: App {
     private let initError: String?
 
     init() {
+        UserDefaults.standard.register(defaults: ["promptForPaneLabel": true])
         do {
             let schema = Schema([
                 Project.self,
@@ -94,7 +95,7 @@ struct WTMuxApp: App {
         .environment(themeManager)
         .defaultSize(width: 1280, height: 800)
         .windowStyle(.titleBar)
-        .windowToolbarStyle(.unified(showsTitle: true))
+        .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
             CommandGroup(replacing: .newItem) { }
         }

@@ -1,13 +1,15 @@
 import Foundation
 
 @MainActor @Observable
-final class WorktreeColumn: Identifiable {
+final class WorktreePane: Identifiable {
     let id: UUID
     var worktreeID: String?
     var showRunnerPanel: Bool
     var showRightPanel: Bool
     var changedFileCount: Int
     var isMinimized: Bool
+    var label: String?
+    var showLabel: Bool
     var dropZone: DropZone = .none
 
     init(
@@ -16,7 +18,9 @@ final class WorktreeColumn: Identifiable {
         showRunnerPanel: Bool = false,
         showRightPanel: Bool = false,
         changedFileCount: Int = 0,
-        isMinimized: Bool = false
+        isMinimized: Bool = false,
+        label: String? = nil,
+        showLabel: Bool = true
     ) {
         self.id = id
         self.worktreeID = worktreeID
@@ -24,5 +28,7 @@ final class WorktreeColumn: Identifiable {
         self.showRightPanel = showRightPanel
         self.changedFileCount = changedFileCount
         self.isMinimized = isMinimized
+        self.label = label
+        self.showLabel = showLabel
     }
 }

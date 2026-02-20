@@ -45,7 +45,7 @@ enum DiffViewMode: Hashable {
 struct ChangesPanel: View {
     let worktree: Worktree
     let paneManager: SplitPaneManager
-    let columnID: UUID
+    let paneID: UUID
     @Binding var changedFileCount: Int
 
     @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
@@ -157,7 +157,7 @@ struct ChangesPanel: View {
                        let file = diffFiles.first(where: {
                            $0.displayPath == path || $0.id == path || $0.oldPath == path || $0.newPath == path
                        }) {
-                        paneManager.openDiffTab(file: file, worktreePath: worktree.path, branchName: worktree.branchName, fromColumn: columnID)
+                        paneManager.openDiffTab(file: file, worktreePath: worktree.path, branchName: worktree.branchName, fromPane: paneID)
                     }
                 }
             }

@@ -46,9 +46,17 @@ public struct TerminalRepresentable: NSViewRepresentable {
         return view
     }
 
+    public class Coordinator {
+        var lastIsActive = false
+    }
+
+    public func makeCoordinator() -> Coordinator { Coordinator() }
+
     public func updateNSView(_ nsView: DeferredStartTerminalView, context: Context) {
         applyTheme(theme, to: nsView)
-        if isActive {
+        let wasActive = context.coordinator.lastIsActive
+        context.coordinator.lastIsActive = isActive
+        if isActive && !wasActive {
             DispatchQueue.main.async {
                 nsView.window?.makeFirstResponder(nsView)
             }

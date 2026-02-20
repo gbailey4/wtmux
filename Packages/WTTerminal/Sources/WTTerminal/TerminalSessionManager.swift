@@ -44,15 +44,15 @@ public final class TerminalSessionManager: @unchecked Sendable {
             .sorted { $0.id < $1.id }
     }
 
-    /// Returns the terminal (non-runner) session for a specific column, if any.
-    public func terminalSession(forColumn columnId: String) -> TerminalSession? {
+    /// Returns the terminal (non-runner) session for a specific pane, if any.
+    public func terminalSession(forPane paneId: String) -> TerminalSession? {
         sessions.values
-            .first { $0.columnId == columnId && !SessionID.isRunner($0.id) }
+            .first { $0.paneId == paneId && !SessionID.isRunner($0.id) }
     }
 
-    /// Creates a terminal session for a column. Each column has exactly one terminal.
-    public func createTerminal(forColumn columnId: String, worktreeId: String, workingDirectory: String, initialCommand: String? = nil) -> TerminalSession {
-        let id = SessionID.tab(columnId: columnId, index: 1)
+    /// Creates a terminal session for a pane. Each pane has exactly one terminal.
+    public func createTerminal(forPane paneId: String, worktreeId: String, workingDirectory: String, initialCommand: String? = nil) -> TerminalSession {
+        let id = SessionID.tab(paneId: paneId, index: 1)
         let title = "Terminal"
         let session = createSession(
             id: id,
@@ -61,18 +61,18 @@ public final class TerminalSessionManager: @unchecked Sendable {
             workingDirectory: workingDirectory,
             initialCommand: initialCommand
         )
-        session.columnId = columnId
-        activeSessionId[columnId] = id
+        session.paneId = paneId
+        activeSessionId[paneId] = id
         return session
     }
 
-    public func setActiveSession(columnId: String, sessionId: String) {
-        activeSessionId[columnId] = sessionId
+    public func setActiveSession(paneId: String, sessionId: String) {
+        activeSessionId[paneId] = sessionId
     }
 
     public func removeTerminal(sessionId: String) {
         guard let session = sessions[sessionId] else { return }
-        let key = session.columnId ?? session.worktreeId
+        let key = session.paneId ?? session.worktreeId
 
         session.terminalView?.terminate()
         session.terminalView = nil
@@ -91,10 +91,10 @@ public final class TerminalSessionManager: @unchecked Sendable {
 
     /// Terminates and removes all sessions (terminal + runners) for a worktree.
     public func terminateAllSessionsForWorktree(_ worktreeId: String) {
-        // Collect columnIds before removal
-        let columnIds = Set(sessions.values
+        // Collect paneIds before removal
+        let paneIds = Set(sessions.values
             .filter { $0.worktreeId == worktreeId && !SessionID.isRunner($0.id) }
-            .compactMap(\.columnId))
+            .compactMap(\.paneId))
 
         let terminalIds = sessions.values
             .filter { $0.worktreeId == worktreeId && !SessionID.isRunner($0.id) }
@@ -104,35 +104,35 @@ public final class TerminalSessionManager: @unchecked Sendable {
         }
         removeRunnerSessions(forWorktree: worktreeId)
 
-        // Clean up column-based state
-        for columnId in columnIds {
-            activeSessionId.removeValue(forKey: columnId)
+        // Clean up pane-based state
+        for paneId in paneIds {
+            activeSessionId.removeValue(forKey: paneId)
         }
         // Also clean up legacy worktree-keyed state
         activeSessionId.removeValue(forKey: worktreeId)
     }
 
-    /// Terminates and removes the terminal session for a specific column.
-    public func terminateSessionsForColumn(_ columnId: String) {
-        if let session = terminalSession(forColumn: columnId) {
+    /// Terminates and removes the terminal session for a specific pane.
+    public func terminateSessionsForPane(_ paneId: String) {
+        if let session = terminalSession(forPane: paneId) {
             removeTerminal(sessionId: session.id)
         }
-        activeSessionId.removeValue(forKey: columnId)
+        activeSessionId.removeValue(forKey: paneId)
     }
 
-    /// Moves a session from one column to another, preserving the terminal view.
-    public func moveSession(sessionId: String, fromColumn: String, toColumn: String) {
+    /// Moves a session from one pane to another, preserving the terminal view.
+    public func moveSession(sessionId: String, fromPane: String, toPane: String) {
         guard let session = sessions[sessionId] else { return }
 
-        // Update session's column
-        session.columnId = toColumn
+        // Update session's pane
+        session.paneId = toPane
 
         // Update active session in target
-        activeSessionId[toColumn] = sessionId
+        activeSessionId[toPane] = sessionId
 
         // Clear source
-        if activeSessionId[fromColumn] == sessionId {
-            activeSessionId.removeValue(forKey: fromColumn)
+        if activeSessionId[fromPane] == sessionId {
+            activeSessionId.removeValue(forKey: fromPane)
         }
     }
 

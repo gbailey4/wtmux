@@ -2,7 +2,7 @@ import SwiftUI
 import WTCore
 import WTTerminal
 
-/// Shared header rendered once above all columns when every column in the focused window
+/// Shared header rendered once above all panes when every pane in the focused window
 /// displays the same worktree. Shows project identity, Claude status, and config/setup banners.
 struct SharedWorktreeHeaderView: View {
     let worktree: Worktree
@@ -10,16 +10,8 @@ struct SharedWorktreeHeaderView: View {
     let terminalSessionManager: TerminalSessionManager
 
     @Environment(ClaudeIntegrationService.self) private var claudeIntegrationService
-    @Environment(ClaudeStatusManager.self) private var claudeStatusManager
-    @AppStorage("terminalThemeId") private var terminalThemeId = TerminalThemes.defaultTheme.id
-    @Environment(ThemeManager.self) private var themeManager
-
     @State private var showConfigPendingBanner = false
     @State private var showSetupBanner = false
-
-    private var currentTheme: TerminalTheme {
-        themeManager.theme(forId: terminalThemeId)
-    }
 
     private var worktreeId: String { worktree.path }
 
@@ -27,19 +19,6 @@ struct SharedWorktreeHeaderView: View {
         terminalSessionManager.sessions(forWorktree: worktreeId).contains { session in
             session.initialCommand?.contains("configure_project") == true
         }
-    }
-
-    /// Aggregate Claude status across all columns showing this worktree.
-    private var claudeStatus: ClaudeCodeStatus? {
-        guard let window = paneManager.focusedWindow else { return nil }
-        var best: ClaudeCodeStatus?
-        for column in window.columns {
-            if let status = claudeStatusManager.status(forColumn: column.id.uuidString, worktreePath: worktreeId) {
-                if best == nil { best = status }
-                else if status.priority > best!.priority { best = status }
-            }
-        }
-        return best
     }
 
     var body: some View {
@@ -57,36 +36,6 @@ struct SharedWorktreeHeaderView: View {
                 setupBanner(commands: commands)
                 Divider()
             }
-
-            // Shared breadcrumb header
-            HStack(spacing: 5) {
-                if let project = worktree.project {
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(projectColor(for: project))
-                        .frame(width: 3, height: 12)
-                    Image(systemName: project.resolvedIconName)
-                        .foregroundStyle(projectColor(for: project))
-                        .font(.caption)
-                    Text(project.name)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Text("/")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                Text(worktree.branchName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                if let status = claudeStatus {
-                    claudeStatusBadge(status)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(currentTheme.chromeBackground.toColor())
         }
         .task(id: worktreeId) {
             showConfigPendingBanner = worktree.project?.needsClaudeConfig == true
@@ -111,36 +60,6 @@ struct SharedWorktreeHeaderView: View {
             } else if newValue == false {
                 showConfigPendingBanner = false
             }
-        }
-    }
-
-    // MARK: - Claude Status Badge
-
-    @ViewBuilder
-    private func claudeStatusBadge(_ status: ClaudeCodeStatus) -> some View {
-        switch status {
-        case .idle:
-            Image(systemName: "circle.fill")
-                .font(.system(size: 6))
-                .foregroundStyle(.secondary)
-        case .thinking:
-            Image(systemName: "circle.fill")
-                .font(.system(size: 6))
-                .foregroundStyle(.purple)
-                .symbolEffect(.pulse)
-        case .working:
-            Image(systemName: "circle.fill")
-                .font(.system(size: 6))
-                .foregroundStyle(.blue)
-                .symbolEffect(.pulse)
-        case .needsAttention:
-            Image(systemName: "circle.fill")
-                .font(.system(size: 6))
-                .foregroundStyle(.orange)
-        case .done:
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 8))
-                .foregroundStyle(.green)
         }
     }
 
@@ -198,19 +117,19 @@ struct SharedWorktreeHeaderView: View {
             Spacer()
             Button("Run Setup") {
                 showSetupBanner = false
-                if let col = paneManager.focusedColumn {
-                    col.showRunnerPanel = true
+                if let focusedPane = paneManager.focusedPane {
+                    focusedPane.showRunnerPanel = true
                 }
                 let showRunnerBinding = Binding(
-                    get: { paneManager.focusedColumn?.showRunnerPanel ?? false },
-                    set: { paneManager.focusedColumn?.showRunnerPanel = $0 }
+                    get: { paneManager.focusedPane?.showRunnerPanel ?? false },
+                    set: { paneManager.focusedPane?.showRunnerPanel = $0 }
                 )
                 let runner = RunnerPanelView(
                     worktree: worktree,
                     terminalSessionManager: terminalSessionManager,
                     paneManager: paneManager,
                     showRunnerPanel: showRunnerBinding,
-                    isColumnFocused: true
+                    isPaneFocused: true
                 )
                 runner.runSetup()
             }
@@ -232,27 +151,13 @@ struct SharedWorktreeHeaderView: View {
 
     private func openClaudeConfigTerminal() {
         guard let repoPath = worktree.project?.repoPath,
-              let columnId = paneManager.focusedColumn?.id.uuidString else { return }
+              let paneId = paneManager.focusedPane?.id.uuidString else { return }
         ClaudeConfigHelper.openConfigTerminal(
             terminalSessionManager: terminalSessionManager,
-            columnId: columnId,
+            paneId: paneId,
             worktreeId: worktreeId,
             workingDirectory: worktree.path,
             repoPath: repoPath
         )
-    }
-}
-
-// MARK: - ClaudeCodeStatus priority for aggregation
-
-private extension ClaudeCodeStatus {
-    var priority: Int {
-        switch self {
-        case .idle: 0
-        case .done: 1
-        case .thinking: 2
-        case .working: 3
-        case .needsAttention: 4
-        }
     }
 }

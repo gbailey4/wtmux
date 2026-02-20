@@ -23,14 +23,9 @@ public enum SessionID {
         "\(tabPrefix)\(worktreeId)-\(index)"
     }
 
-    /// Build an ID for an interactive tab (column-scoped).
-    public static func tab(columnId: String, index: Int) -> String {
-        "\(tabPrefix)\(columnId)-\(index)"
-    }
-
-    /// Legacy compatibility alias.
+    /// Build an ID for an interactive tab (pane-scoped).
     public static func tab(paneId: String, index: Int) -> String {
-        tab(columnId: paneId, index: index)
+        "\(tabPrefix)\(paneId)-\(index)"
     }
 
     /// Build an ID for a runner session.
@@ -85,8 +80,8 @@ public final class TerminalSession: Identifiable {
     /// Parameters: session ID, exit code.
     public var onProcessExit: (@MainActor (String, Int32?) -> Void)?
 
-    /// The column this session belongs to (nil for runner sessions, which are worktree-scoped).
-    public var columnId: String?
+    /// The pane this session belongs to (nil for runner sessions, which are worktree-scoped).
+    public var paneId: String?
 
     public var terminalView: DeferredStartTerminalView?
 

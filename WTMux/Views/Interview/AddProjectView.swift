@@ -734,7 +734,7 @@ struct AddProjectView: View {
             }
 
             // 4. Navigate to the new worktree and dismiss
-            // (Claude config terminal is auto-launched by WorktreeColumnView when needsClaudeConfig is true)
+            // (Claude config terminal is auto-launched by WorktreePaneView when needsClaudeConfig is true)
             selectedWorktreeID = worktreePath
             dismiss()
         }
